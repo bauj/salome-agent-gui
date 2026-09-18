@@ -67,3 +67,16 @@ def test_exception_becomes_fatal_event(qtbot):
     qtbot.waitUntil(lambda: bool(got))
     assert got[0]["kind"] == "fatal"
     assert "no server" in got[0]["data"]["message"]
+
+
+def test_cancel_before_start_prevents_gate_signal(qtbot):
+    run, seen = make_run(gate_payload={"plan": []})
+    w = RunWorker("x", {}, run_fn=run)
+    gate_signals = []
+    w.gate.connect(lambda payload: gate_signals.append(payload))
+    w.cancel.set()
+    with qtbot.waitSignal(w.done, timeout=3000):
+        w.start()
+    w.wait()
+    assert seen["decision"] == {"action": "abort"}
+    assert len(gate_signals) == 0

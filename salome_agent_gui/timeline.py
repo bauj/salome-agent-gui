@@ -67,6 +67,10 @@ def _escape(text: str) -> str:
     return text
 
 
+def _code(text: str) -> str:
+    return f'`{text.replace("`", "'")}`'
+
+
 def render_user(text: str) -> str:
     return f"**You:** {_escape(text)}"
 
@@ -79,7 +83,7 @@ def render_run(view: RunView) -> str:
     lines = ["**Agent**", ""]
     for s in view.stages:
         tries = f" (attempt {s.attempts})" if s.attempts > 1 else ""
-        lines.append(f"{s.index + 1}. {ICON.get(s.status, '?')} `{s.module}` "
+        lines.append(f"{s.index + 1}. {ICON.get(s.status, '?')} {_code(s.module)} "
                      f"{_escape(s.intent)}{tries}")
         if s.error and s.status == "failed":
             lines.append(f"    ↳ {_escape(s.error)}")
@@ -98,7 +102,7 @@ def render_run(view: RunView) -> str:
     if view.aborted:
         lines.append("_Run aborted._")
     elif view.finished:
-        objs = ", ".join(f"`{n}`" for n in view.objects) or "none"
+        objs = ", ".join(_code(n) for n in view.objects) or "none"
         lines.append(f"**Done.** Objects: {objs}")
         lines.append("")
         links = [_file_link(n, p) for n, p in (("result.py", view.result_py),
