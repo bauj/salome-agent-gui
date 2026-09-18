@@ -34,8 +34,12 @@ def test_ensure_server_reuses_a_running_server():
 
 def test_ensure_server_starts_when_none():
     calls = []
-    gp = types.SimpleNamespace(_SERVER=None, _SERVER_THREAD=None, _CORE=None,
-                               launch=lambda ctx: calls.append(ctx))
+
+    def launch(ctx):
+        calls.append(ctx)
+        gp._SERVER = object()
+
+    gp = types.SimpleNamespace(_SERVER=None, _SERVER_THREAD=None, _CORE=None, launch=launch)
     assert sl.ensure_server("ctx", gp) == "started"
     assert calls == ["ctx"]
 
@@ -91,3 +95,18 @@ def test_run_with_live_window_does_not_spawn(monkeypatch, tmp_path):
     monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     assert "already open" in sl.run("ctx")
+
+
+def test_ensure_server_returns_foreign_when_launch_declines():
+    calls = []
+    gp = types.SimpleNamespace(_SERVER=None, _SERVER_THREAD=None, _CORE=None,
+                               launch=lambda ctx: calls.append(ctx))
+    assert sl.ensure_server("ctx", gp) == "foreign"
+    assert calls == ["ctx"]
+
+
+def test_run_on_foreign_server_refuses_and_does_not_spawn(monkeypatch):
+    monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "foreign")
+    monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    msg = sl.run("ctx")
+    assert "Stop it first" in msg
