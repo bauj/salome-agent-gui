@@ -68,7 +68,7 @@ def _escape(text: str) -> str:
 
 
 def _code(text: str) -> str:
-    return f'`{text.replace("`", "'")}`'
+    return "`" + text.replace("`", "'") + "`"
 
 
 def render_user(text: str) -> str:
