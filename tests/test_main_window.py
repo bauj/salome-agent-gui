@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 
@@ -137,3 +140,52 @@ def test_close_defers_until_run_completes(qtbot, cfg_path):
     assert w.isVisible()
     release.set()
     qtbot.waitUntil(lambda: w.worker is None and not w.isVisible(), timeout=5000)
+
+
+def test_done_while_close_pending_skips_probe(qtbot, cfg_path):
+    release = threading.Event()
+    probe_calls = []
+
+    def blocking_run(request, config, *, run_id, on_event, on_gate, cancel, batch, verbose):
+        while not release.is_set():
+            time.sleep(0.01)
+
+    def probe_fn():
+        probe_calls.append(1)
+        return {"mode": "gui", "port": 4242}
+
+    w = MainWindow(cfg_path, run_fn=blocking_run, probe_fn=probe_fn)
+    qtbot.addWidget(w)
+    w.show()
+    w.input.setText("test")
+    w.send()
+    qtbot.waitUntil(lambda: w.worker is not None, timeout=3000)
+    w.close()
+    n_before = len(probe_calls)
+    assert w._close_pending is True
+    release.set()
+    qtbot.waitUntil(lambda: w.worker is None and not w.isVisible(), timeout=5000)
+    assert len(probe_calls) == n_before
+
+
+def test_check_parent_closes_when_parent_is_gone(qtbot, cfg_path):
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    w = make(qtbot, cfg_path, gated_run({}), parent_pid=proc.pid)
+    w.show()
+    w._check_parent()
+    assert not w.isVisible()
+    assert "exited" in w.status.text()
+
+
+def test_check_parent_leaves_window_open_when_parent_is_alive(qtbot, cfg_path):
+    w = make(qtbot, cfg_path, gated_run({}), parent_pid=os.getpid())
+    w.show()
+    w._check_parent()
+    assert w.isVisible()
+
+
+def test_no_parent_pid_starts_no_watch_timer(qtbot, cfg_path, monkeypatch):
+    monkeypatch.delenv("SALOME_AGENT_GUI_PARENT_PID", raising=False)
+    w = make(qtbot, cfg_path, gated_run({}))
+    assert w._parent_watch is None

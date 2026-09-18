@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QTimer
@@ -40,7 +41,7 @@ class HistoryLineEdit(QLineEdit):
 
 class MainWindow(QMainWindow):
     def __init__(self, config_path: Path, *, run_fn=None, probe_fn=None,
-                 ask_hint=None, edit_plan=None):
+                 ask_hint=None, edit_plan=None, parent_pid: int | None = None):
         super().__init__()
         from salome_agent import server_conn
 
@@ -63,6 +64,19 @@ class MainWindow(QMainWindow):
         self._poll.timeout.connect(self._poll_tick)
         self._poll.start()
         self.probe()
+
+        if parent_pid is None:
+            try:
+                parent_pid = int(os.environ["SALOME_AGENT_GUI_PARENT_PID"])
+            except (KeyError, ValueError):
+                parent_pid = None
+        self._parent_pid = parent_pid
+        self._parent_watch = None
+        if self._parent_pid is not None:
+            self._parent_watch = QTimer(self)
+            self._parent_watch.setInterval(2000)
+            self._parent_watch.timeout.connect(self._check_parent)
+            self._parent_watch.start()
 
     # ---- layout ---------------------------------------------------------
     def _build(self):
@@ -173,6 +187,21 @@ class MainWindow(QMainWindow):
             return
         self.probe()
 
+    def _check_parent(self):
+        try:
+            os.kill(self._parent_pid, 0)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            return
+        else:
+            return
+        self._parent_watch.stop()
+        self.status.setText("SALOME has exited — closing")
+        if self.worker is not None:
+            self.worker.stop()
+        self.close()
+
     # ---- runs -----------------------------------------------------------
     def _sync_buttons(self):
         running = self.worker is not None
@@ -247,9 +276,10 @@ class MainWindow(QMainWindow):
         self.worker.wait(2000)
         self.worker = None
         self._sync_buttons()
-        self.probe()
         if self._close_pending:
             self.close()
+            return
+        self.probe()
 
     def closeEvent(self, e):
         if self.worker is not None:

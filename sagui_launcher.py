@@ -54,8 +54,9 @@ def ensure_server(context, gui_plugin=None) -> str:
 
 
 def launch_window(launcher: str, path: Path, environ=None, popen=subprocess.Popen) -> int:
-    proc = popen([launcher], start_new_session=True,
-                 env=clean_env(os.environ if environ is None else environ))
+    env = clean_env(os.environ if environ is None else environ)
+    env["SALOME_AGENT_GUI_PARENT_PID"] = str(os.getpid())
+    proc = popen([launcher], start_new_session=True, env=env)
     Path(path).write_text(str(proc.pid))
     return proc.pid
 
