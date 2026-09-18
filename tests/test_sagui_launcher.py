@@ -72,7 +72,7 @@ def test_launch_window_spawns_detached_with_clean_env_and_writes_pid(tmp_path):
     assert pid == 4321
     assert seen["args"] == ["/opt/x/bin/salome-agent-gui.sh"]
     assert seen["start_new_session"] is True
-    assert seen["env"] == {"HOME": "/h"}
+    assert seen["env"] == {"HOME": "/h", "SALOME_AGENT_GUI_PARENT_PID": str(os.getpid())}
     assert (tmp_path / "w.pid").read_text() == "4321"
 
 
