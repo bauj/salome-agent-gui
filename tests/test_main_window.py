@@ -43,6 +43,15 @@ def test_loads_key_fields_and_masks_the_key(qtbot, cfg_path):
     w = make(qtbot, cfg_path, gated_run({}))
     assert w.base_url.text() == "http://h/v1" and w.model.text() == "m"
     assert w.api_key.text() == "secret"
+
+
+def test_loads_run_options_from_config(qtbot, tmp_path):
+    cfg = {**CFG, "policy": {"on_stage_failure": "continue", "tool_selection": "all"}}
+    p = tmp_path / "salome-agent.json"
+    p.write_text(json.dumps(cfg))
+    w = make(qtbot, p, gated_run({}))
+    assert w.on_failure.currentText() == "continue"
+    assert w.tools.currentText() == "all"
     assert w.api_key.echoMode() == w.api_key.Password
 
 

@@ -44,7 +44,10 @@ def window_alive(path: Path) -> bool:
 def ensure_server(context, gui_plugin=None) -> str:
     if gui_plugin is None:
         from agent_server import gui_plugin
-    if gui_plugin._SERVER is not None:
+    thread = getattr(gui_plugin, "_SERVER_THREAD", None)
+    core = getattr(gui_plugin, "_CORE", None)
+    if (gui_plugin._SERVER is not None and thread is not None and thread.is_alive()
+            and core is not None and not core.poisoned()):
         return "reused"
     gui_plugin.launch(context)
     return "started"

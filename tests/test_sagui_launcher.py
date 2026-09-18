@@ -24,14 +24,38 @@ def test_window_alive_reads_the_pid_file(tmp_path):
 
 def test_ensure_server_reuses_a_running_server():
     calls = []
-    gp = types.SimpleNamespace(_SERVER=object(), launch=lambda ctx: calls.append(ctx))
+    thread = types.SimpleNamespace(is_alive=lambda: True)
+    core = types.SimpleNamespace(poisoned=lambda: False)
+    gp = types.SimpleNamespace(_SERVER=object(), _SERVER_THREAD=thread, _CORE=core,
+                               launch=lambda ctx: calls.append(ctx))
     assert sl.ensure_server("ctx", gp) == "reused"
     assert calls == []
 
 
 def test_ensure_server_starts_when_none():
     calls = []
-    gp = types.SimpleNamespace(_SERVER=None, launch=lambda ctx: calls.append(ctx))
+    gp = types.SimpleNamespace(_SERVER=None, _SERVER_THREAD=None, _CORE=None,
+                               launch=lambda ctx: calls.append(ctx))
+    assert sl.ensure_server("ctx", gp) == "started"
+    assert calls == ["ctx"]
+
+
+def test_ensure_server_starts_when_the_server_thread_is_dead():
+    calls = []
+    thread = types.SimpleNamespace(is_alive=lambda: False)
+    core = types.SimpleNamespace(poisoned=lambda: False)
+    gp = types.SimpleNamespace(_SERVER=object(), _SERVER_THREAD=thread, _CORE=core,
+                               launch=lambda ctx: calls.append(ctx))
+    assert sl.ensure_server("ctx", gp) == "started"
+    assert calls == ["ctx"]
+
+
+def test_ensure_server_starts_when_the_core_is_poisoned():
+    calls = []
+    thread = types.SimpleNamespace(is_alive=lambda: True)
+    core = types.SimpleNamespace(poisoned=lambda: True)
+    gp = types.SimpleNamespace(_SERVER=object(), _SERVER_THREAD=thread, _CORE=core,
+                               launch=lambda ctx: calls.append(ctx))
     assert sl.ensure_server("ctx", gp) == "started"
     assert calls == ["ctx"]
 

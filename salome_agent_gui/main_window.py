@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QTimer
@@ -140,6 +141,13 @@ class MainWindow(QMainWindow):
         self.base_url.setText(f["base_url"])
         self.model.setText(f["model"])
         self.api_key.setText(f["api_key"])
+        policy = json.loads(self.config_path.read_text()).get("policy", {})
+        on_failure = policy.get("on_stage_failure")
+        if on_failure in [self.on_failure.itemText(i) for i in range(self.on_failure.count())]:
+            self.on_failure.setCurrentText(on_failure)
+        tools = policy.get("tool_selection")
+        if tools in [self.tools.itemText(i) for i in range(self.tools.count())]:
+            self.tools.setCurrentText(tools)
 
     def _save_key_fields(self):
         config_store.save_key_fields(self.config_path, {
@@ -228,6 +236,7 @@ class MainWindow(QMainWindow):
 
     def _stop(self):
         if self.worker is not None:
+            self.status.setText("Stopping the current run…")
             self.worker.stop()
 
     def _on_done(self, _result):
@@ -238,6 +247,7 @@ class MainWindow(QMainWindow):
         self.worker.wait(2000)
         self.worker = None
         self._sync_buttons()
+        self.probe()
         if self._close_pending:
             self.close()
 
