@@ -1,0 +1,3 @@
+[submodule "salome-agent"]
+	path = salome-agent
+	url = https://github.com/bauj/salome-agent.git
