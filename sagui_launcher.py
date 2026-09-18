@@ -1,9 +1,8 @@
 """SALOME-side half of the SALOME Agent plugin: start/reuse the in-GUI agent
 server and spawn the chat window (its own venv) once."""
-import getpass
+import json
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 STRIP_VARS = ("PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH",
@@ -18,13 +17,15 @@ def clean_env(environ) -> dict:
 
 
 def pid_path() -> Path:
-    return Path(tempfile.gettempdir()) / f"salome-agent-gui-{getpass.getuser()}.pid"
+    return Path.home() / ".salome_agent" / "salome-agent-gui.pid"
 
 
 def window_alive(path: Path) -> bool:
     try:
-        pid = int(Path(path).read_text().strip())
-    except (OSError, ValueError):
+        data = json.loads(Path(path).read_text())
+        pid = int(data["pid"])
+        stored_start = data.get("pid_start")
+    except (OSError, ValueError, KeyError, TypeError):
         return False
     try:
         done, _ = os.waitpid(pid, os.WNOHANG)   # reap our own exited child (else a zombie looks alive)
@@ -33,11 +34,20 @@ def window_alive(path: Path) -> bool:
     except ChildProcessError:
         pass
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+        from agent_server.handshake import _pid_start
+    except ImportError:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
         return True
+    live_start = _pid_start(pid)
+    if live_start is None:
+        return False
+    if stored_start is not None and stored_start != live_start:
+        return False               # pid was reused by an unrelated process
     return True
 
 
@@ -59,7 +69,14 @@ def launch_window(launcher: str, path: Path, environ=None, popen=subprocess.Pope
     env = clean_env(os.environ if environ is None else environ)
     env["SALOME_AGENT_GUI_PARENT_PID"] = str(os.getpid())
     proc = popen([launcher], start_new_session=True, env=env)
-    Path(path).write_text(str(proc.pid))
+    try:
+        from agent_server.handshake import _pid_start
+        pid_start = _pid_start(proc.pid)
+    except ImportError:
+        pid_start = None
+    path = Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pid": proc.pid, "pid_start": pid_start}))
     return proc.pid
 
 

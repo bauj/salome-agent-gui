@@ -1,7 +1,9 @@
+import json
 import os
 import types
 
 import sagui_launcher as sl
+from agent_server.handshake import _pid_start
 
 
 def test_clean_env_strips_salome_qt_and_python_vars():
@@ -16,10 +18,21 @@ def test_window_alive_reads_the_pid_file(tmp_path):
     assert not sl.window_alive(p)
     p.write_text("garbage")
     assert not sl.window_alive(p)
-    p.write_text(str(os.getpid()))
+    p.write_text(json.dumps({"pid": os.getpid(), "pid_start": _pid_start(os.getpid())}))
     assert sl.window_alive(p)
-    p.write_text("999999999")
+    p.write_text(json.dumps({"pid": 999999999, "pid_start": 1}))
     assert not sl.window_alive(p)
+
+
+def test_window_alive_rejects_a_recycled_pid(tmp_path):
+    p = tmp_path / "w.pid"
+    p.write_text(json.dumps({"pid": os.getpid(), "pid_start": _pid_start(os.getpid()) + 1}))
+    assert not sl.window_alive(p)
+
+
+def test_pid_path_lives_under_salome_agent_home_dir():
+    from pathlib import Path
+    assert sl.pid_path() == Path.home() / ".salome_agent" / "salome-agent-gui.pid"
 
 
 def test_ensure_server_reuses_a_running_server():
@@ -69,15 +82,18 @@ def test_launch_window_spawns_detached_with_clean_env_and_writes_pid(tmp_path):
 
     def popen(args, **kw):
         seen.update(args=args, **kw)
-        return types.SimpleNamespace(pid=4321)
+        return types.SimpleNamespace(pid=os.getpid())
 
-    pid = sl.launch_window("/opt/x/bin/salome-agent-gui.sh", tmp_path / "w.pid",
+    path = tmp_path / "dir" / "w.pid"
+    pid = sl.launch_window("/opt/x/bin/salome-agent-gui.sh", path,
                            environ={"PYTHONPATH": "p", "HOME": "/h"}, popen=popen)
-    assert pid == 4321
+    assert pid == os.getpid()
     assert seen["args"] == ["/opt/x/bin/salome-agent-gui.sh"]
     assert seen["start_new_session"] is True
     assert seen["env"] == {"HOME": "/h", "SALOME_AGENT_GUI_PARENT_PID": str(os.getpid())}
-    assert (tmp_path / "w.pid").read_text() == "4321"
+    data = json.loads(path.read_text())
+    assert data["pid"] == os.getpid()
+    assert data["pid_start"] == _pid_start(os.getpid())
 
 
 def test_run_without_launcher_env_reports_it(monkeypatch, tmp_path):
@@ -90,7 +106,7 @@ def test_run_without_launcher_env_reports_it(monkeypatch, tmp_path):
 def test_run_with_live_window_does_not_spawn(monkeypatch, tmp_path):
     monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "reused")
     p = tmp_path / "w.pid"
-    p.write_text(str(os.getpid()))
+    p.write_text(json.dumps({"pid": os.getpid(), "pid_start": _pid_start(os.getpid())}))
     monkeypatch.setattr(sl, "pid_path", lambda: p)
     monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
@@ -106,7 +122,21 @@ def test_ensure_server_returns_foreign_when_launch_declines():
 
 
 def test_run_on_foreign_server_refuses_and_does_not_spawn(monkeypatch):
+    from agent_server import handshake
+
     monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "foreign")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(handshake, "live_owner",
+                        lambda: {"pid": 123, "mode": "gui"})
     msg = sl.run("ctx")
     assert "Stop it first" in msg
+
+
+def test_run_on_foreign_server_without_owner_details_falls_back(monkeypatch):
+    from agent_server import handshake
+
+    monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "foreign")
+    monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(handshake, "live_owner", lambda: None)
+    msg = sl.run("ctx")
+    assert "Messages window" in msg
