@@ -50,6 +50,8 @@ def ensure_server(context, gui_plugin=None) -> str:
             and core is not None and not core.poisoned()):
         return "reused"
     gui_plugin.launch(context)
+    if gui_plugin._SERVER is None:
+        return "foreign"
     return "started"
 
 
@@ -62,7 +64,16 @@ def launch_window(launcher: str, path: Path, environ=None, popen=subprocess.Pope
 
 
 def run(context) -> str:
-    ensure_server(context)
+    if ensure_server(context) == "foreign":
+        from agent_server import handshake
+
+        owner = handshake.live_owner()
+        if owner is not None:
+            return (f"Another SALOME agent server is already running (pid {owner['pid']}, "
+                    f"{owner.get('mode')} mode). The chat window would drive that session, "
+                    "not this SALOME. Stop it first, then click again.")
+        return ("The SALOME agent server could not be started in this SALOME; "
+                "see the Messages window.")
     path = pid_path()
     if window_alive(path):
         return "The SALOME Agent window is already open."
