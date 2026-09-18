@@ -102,15 +102,21 @@ def render_run(view: RunView) -> str:
     if view.aborted:
         lines.append("_Run aborted._")
     elif view.finished:
-        objs = ", ".join(_code(n) for n in view.objects) or "none"
-        lines.append(f"**Done.** Objects: {objs}")
-        lines.append("")
         links = [_file_link(n, p) for n, p in (("result.py", view.result_py),
                                                ("report.md", view.report_md)) if p]
-        lines.append(" · ".join(links))
-        if view.usage:
-            nums = ", ".join(f"{k}={v}" for k, v in view.usage.items()
-                             if isinstance(v, (int, float)) and not isinstance(v, bool))
+        if view.fatal:
+            if links:
+                lines.append("")
+                lines.append(" · ".join(links))
+        else:
+            objs = ", ".join(_code(n) for n in view.objects) or "none"
+            lines.append(f"**Done.** Objects: {objs}")
             lines.append("")
-            lines.append(f"_LLM usage: {nums}_")
+            if links:
+                lines.append(" · ".join(links))
+            if view.usage:
+                nums = ", ".join(f"{k}={v}" for k, v in view.usage.items()
+                                 if isinstance(v, (int, float)) and not isinstance(v, bool))
+                lines.append("")
+                lines.append(f"_LLM usage: {nums}_")
     return "\n".join(lines)

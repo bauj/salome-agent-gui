@@ -64,6 +64,26 @@ def test_fatal_and_aborted_render():
     assert v.finished and "aborted" in render_run(v).lower()
 
 
+def test_fatal_run_that_finishes_skips_done_but_keeps_report_link():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN[:1]))
+    v.apply(ev("fatal", message="LLM endpoint down"))
+    v.apply(ev("report", result_py=None, report_md="/w/r1/report.md", text="# r"))
+    md = render_run(v)
+    assert v.finished and not v.aborted
+    assert "LLM endpoint down" in md
+    assert "Done." not in md
+    assert "(file:///w/r1/report.md)" in md
+
+
+def test_fatal_run_with_no_paths_emits_no_empty_links_line():
+    v = RunView()
+    v.apply(ev("fatal", message="boom"))
+    v.apply(ev("report", result_py=None, report_md=None, text="# r"))
+    md = render_run(v)
+    assert md.rstrip("\n").splitlines()[-1] == "**Run failed:** boom"
+
+
 def test_event_for_unknown_index_extends_rows():
     v = RunView()
     v.apply(ev("stage_start", index=2, module="geom", intent="late"))
