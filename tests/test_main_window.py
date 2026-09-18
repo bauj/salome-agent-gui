@@ -189,3 +189,21 @@ def test_no_parent_pid_starts_no_watch_timer(qtbot, cfg_path, monkeypatch):
     monkeypatch.delenv("SALOME_AGENT_GUI_PARENT_PID", raising=False)
     w = make(qtbot, cfg_path, gated_run({}))
     assert w._parent_watch is None
+
+
+def test_server_error_disables_send_until_reprobe(qtbot, cfg_path):
+    from salome_agent.server_conn import ServerUnavailable
+
+    def failing_run(request, config, *, run_id, on_event, on_gate, cancel, batch, verbose):
+        raise ServerUnavailable("poisoned")
+
+    w = make(qtbot, cfg_path, failing_run)
+    w.probe()
+    w.input.setText("x")
+    w.send()
+    qtbot.waitUntil(lambda: w.worker is None, timeout=3000)
+    assert not w.send_btn.isEnabled()
+    assert "poisoned" in w.status.text()
+    w._probe_fn = lambda: {"mode": "gui", "port": 4242}
+    w.probe()
+    assert w.send_btn.isEnabled()

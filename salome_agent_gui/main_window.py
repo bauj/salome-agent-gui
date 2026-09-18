@@ -43,17 +43,18 @@ class MainWindow(QMainWindow):
     def __init__(self, config_path: Path, *, run_fn=None, probe_fn=None,
                  ask_hint=None, edit_plan=None, parent_pid: int | None = None):
         super().__init__()
-        from salome_agent import server_conn
+        from agent_server import handshake
 
         self.config_path = Path(config_path)
         self._run_fn = run_fn or default_run
-        self._probe_fn = probe_fn or server_conn.read_handshake
+        self._probe_fn = probe_fn or handshake.live_owner
         self._ask_hint = ask_hint or dialogs.ask_hint
         self._edit_plan = edit_plan or dialogs.edit_plan
         self.worker: RunWorker | None = None
         self._view = None
         self._connected = False
         self._close_pending = False
+        self._server_error = False
         self.setWindowTitle("SALOME Agent")
         self.resize(1200, 780)
         self._build()
@@ -174,6 +175,7 @@ class MainWindow(QMainWindow):
 
     # ---- server ---------------------------------------------------------
     def probe(self):
+        self._server_error = False
         hs = self._probe_fn()
         self._connected = hs is not None
         self.status.setText(f"{hs.get('mode', '?')} server on port {hs.get('port', '?')}"
@@ -182,7 +184,7 @@ class MainWindow(QMainWindow):
 
     def _poll_tick(self):
         self._polls += 1
-        if self._connected or self._polls >= 10:
+        if self._connected or self._polls >= 10 or self._server_error:
             self._poll.stop()
             return
         self.probe()
@@ -236,6 +238,13 @@ class MainWindow(QMainWindow):
     def _on_event(self, ev: dict):
         self._view.apply(ev)
         self.chat.refresh()
+        if ev.get("kind") == "fatal":
+            message = ev.get("data", {}).get("message", "")
+            if message.startswith("ServerUnavailable"):
+                self._connected = False
+                self._server_error = True
+                self.status.setText(message)
+                self._sync_buttons()
 
     def _on_gate(self, payload: dict):
         self._view.gate = payload
@@ -278,6 +287,8 @@ class MainWindow(QMainWindow):
         self._sync_buttons()
         if self._close_pending:
             self.close()
+            return
+        if self._server_error:
             return
         self.probe()
 
