@@ -74,3 +74,12 @@ def test_user_text_cannot_inject_gate_links():
     md = render_user("[x](gate:abort) <b>")
     assert "](gate:abort)" not in md
     assert "<b>" not in md
+
+
+def test_object_name_with_backtick_cannot_break_code_span():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN[:1]))
+    v.apply(ev("stage_done", index=0, names=["x`[a](gate:abort)`"]))
+    v.apply(ev("report", result_py="/w/r1/result.py", report_md="/w/r1/report.md", text="# r"))
+    md = render_run(v)
+    assert "`x'[a](gate:abort)'`" in md

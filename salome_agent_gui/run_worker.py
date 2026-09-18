@@ -52,6 +52,9 @@ class RunWorker(QThread):
         self._answered.clear()
         self._decision = None
         self._pending = True
+        if self.cancel.is_set():
+            self._pending = False
+            return {"action": "abort"}
         self.gate.emit(payload)
         self._answered.wait()
         self._pending = False
