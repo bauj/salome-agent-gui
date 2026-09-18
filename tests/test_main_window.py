@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 
 import pytest
 
@@ -106,3 +108,23 @@ def test_no_server_keeps_send_disabled(qtbot, cfg_path):
     w.probe()
     assert not w.send_btn.isEnabled()
     assert "Plugins" in w.status.text()
+
+
+def test_close_defers_until_run_completes(qtbot, cfg_path):
+    release = threading.Event()
+
+    def blocking_run(request, config, *, run_id, on_event, on_gate, cancel, batch, verbose):
+        while not release.is_set():
+            time.sleep(0.01)
+
+    w = make(qtbot, cfg_path, blocking_run)
+    w.show()
+    w.probe()
+    w.input.setText("test")
+    w.send()
+    qtbot.waitUntil(lambda: w.worker is not None, timeout=3000)
+    w.close()
+    assert w._close_pending is True and w.worker is not None
+    assert w.isVisible()
+    release.set()
+    qtbot.waitUntil(lambda: w.worker is None and not w.isVisible(), timeout=5000)

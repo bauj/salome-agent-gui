@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         self.worker: RunWorker | None = None
         self._view = None
         self._connected = False
+        self._close_pending = False
         self.setWindowTitle("SALOME Agent")
         self.resize(1200, 780)
         self._build()
@@ -237,9 +238,15 @@ class MainWindow(QMainWindow):
         self.worker.wait(2000)
         self.worker = None
         self._sync_buttons()
+        if self._close_pending:
+            self.close()
 
     def closeEvent(self, e):
         if self.worker is not None:
             self.worker.stop()
-            self.worker.wait(3000)
+            if not self.worker.wait(3000):
+                self._close_pending = True
+                self.status.setText("Stopping the current run…")
+                e.ignore()
+                return
         super().closeEvent(e)
