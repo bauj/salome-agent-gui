@@ -144,7 +144,8 @@ def test_enter_sends_and_shift_enter_does_not(qtbot, page):
 
 def test_result_shows_objects_file_chips_and_usage(qtbot, page):
     view, fake = page
-    fake.emit("renderTurn", DONE_VM)
+    bare = [dict(s, objects=[]) for s in DONE_VM["stages"]]   # steps that list no objects
+    fake.emit("renderTurn", dict(DONE_VM, stages=bare))
     wait_js(qtbot, view, "!!document.querySelector('.result')")
     assert run_js(qtbot, view, "document.querySelector('.result-line').textContent") == \
         "Built 5 objects"
@@ -254,3 +255,29 @@ def test_stopped_step_does_not_spin(qtbot, page):
     assert run_js(qtbot, view, "document.querySelector('.step > .st').className") == "st stopped"
     assert run_js(qtbot, view, "!!document.querySelector('.step svg.spin')") is False
     assert run_js(qtbot, view, "document.querySelector('.step .meta').textContent") == "stopped"
+
+
+def test_a_plan_gate_with_no_stages_still_offers_approve_and_abort(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", dict(PLAN_VM, stages=[]))
+    wait_js(qtbot, view, "document.querySelectorAll('.msg-agent').length === 1")
+    assert run_js(qtbot, view, "!!document.querySelector('[data-action=approve]')") is True
+    assert run_js(qtbot, view, "!!document.querySelector('[data-action=abort]')") is True
+
+
+def test_objects_already_listed_under_their_steps_are_not_listed_again(qtbot, page):
+    view, fake = page
+    stages = [dict(DONE_VM["stages"][0], objects=["fuse_1"]),
+              dict(DONE_VM["stages"][1], objects=DONE_VM["objects"][1:])]
+    fake.emit("renderTurn", dict(DONE_VM, stages=stages))
+    wait_js(qtbot, view, "!!document.querySelector('.result')")
+    assert run_js(qtbot, view, "document.querySelector('.result details.objects')") is None
+    assert run_js(qtbot, view, "document.querySelector('.result-line').textContent") == \
+        "Built 5 objects"
+
+
+def test_objects_of_a_turn_without_steps_are_still_listed(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", dict(EDIT_VM, objects=["torus_1"]))
+    wait_js(qtbot, view, "!!document.querySelector('.result')")
+    assert run_js(qtbot, view, "!!document.querySelector('.result details.objects')") is True
