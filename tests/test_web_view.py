@@ -25,3 +25,10 @@ def test_page_never_loads_remote_resources():
         text = (web_view.WEB_DIR / name).read_text()
         assert "http://" not in text and "https://" not in text.replace(
             "http://www.w3.org/2000/svg", ""), name
+
+
+def test_batch_switch_says_it_also_skips_the_failure_prompt():
+    html = (web_view.WEB_DIR / "index.html").read_text()
+    assert "Auto-approve plans" not in html
+    assert html.count("Run without asking") == 2
+    assert "stage-failure prompt" in html
