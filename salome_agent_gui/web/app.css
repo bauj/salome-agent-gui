@@ -352,3 +352,7 @@ body.settings-open .drawer { transform: none; }
 #btn-theme .i-sun { display: none; }
 [data-theme="dark"] #btn-theme .i-sun { display: block; }
 [data-theme="dark"] #btn-theme .i-moon { display: none; }
+
+/* objects a finished step made */
+.step-objs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.chip.mini { padding: 1px 7px; font-size: 11.5px; font-family: var(--mono); cursor: default; }

@@ -223,15 +223,23 @@ def test_theme_button_flips_the_theme_and_stays_enabled_while_busy(qtbot, page):
     qtbot.waitUntil(lambda: ("saveSettings", {"theme": "light"}) in fake.calls, timeout=3000)
 
 
-def test_approved_plan_shows_the_next_step_as_processing(qtbot, page):
+def test_step_shows_the_objects_it_made_as_text(qtbot, page):
     view, fake = page
-    fake.emit("renderTurn", PLAN_VM)
+    stages = [dict(DONE_VM["stages"][0], objects=["fuse_1", EVIL]),
+              dict(DONE_VM["stages"][1], objects=[])]
+    fake.emit("renderTurn", dict(DONE_VM, stages=stages))
     wait_js(qtbot, view, "document.querySelectorAll('.step').length === 2")
-    assert run_js(qtbot, view, "document.querySelectorAll('.step .st.run').length") == 0
-    fake.emit("renderTurn", dict(PLAN_VM, gate=None))           # approved, stage not started
+    assert run_js(qtbot, view, "[...document.querySelectorAll('.step')[0]"
+                               ".querySelectorAll('.step-objs .chip')].map(e => e.textContent)"
+                               ".join('|')") == "fuse_1|" + EVIL
+    assert run_js(qtbot, view, "document.querySelectorAll('.step')[1]"
+                               ".querySelector('.step-objs')") is None
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+
+
+def test_the_page_draws_pending_steps_as_pending(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", dict(PLAN_VM, gate=None))      # Python decides what runs
     wait_js(qtbot, view, "!document.querySelector('[data-action=approve]')")
     assert run_js(qtbot, view, "[...document.querySelectorAll('.step > .st')]"
-                               ".map(e => e.className).join('|')") == "st run|st pend"
-    assert run_js(qtbot, view, "!!document.querySelector('.step .st.run svg.spin')") is True
-    assert run_js(qtbot, view, "[...document.querySelectorAll('.step')]"
-                               ".map(e => e.className).join('|')") == "step|step pending"
+                               ".map(e => e.className).join('|')") == "st pend|st pend"

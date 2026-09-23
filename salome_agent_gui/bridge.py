@@ -53,6 +53,7 @@ class Bridge(QObject):
         self._next_turn = 0
         self._next_gate = 0
         self._usage_base: dict | None = None
+        self._batch = False
         self._icons: dict[str, str | None] = {}
         self._files: set[str] = set()
         self._polls = 0
@@ -191,6 +192,7 @@ class Bridge(QObject):
         worker.turn_done.connect(self._on_turn_done)
         worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
         self.worker = worker
+        self._batch = s["batch"]
         self.degraded = False
         self._usage_base = None
         worker.start()
@@ -208,7 +210,8 @@ class Bridge(QObject):
         self._emit("addUser", {"text": text})
         turn_id = self._next_turn
         self._next_turn += 1
-        self._turns[turn_id] = RunView(clock=self._clock, usage_base=self._usage_base)
+        self._turns[turn_id] = RunView(clock=self._clock, usage_base=self._usage_base,
+                                         batch=self._batch)
         self._items.append(("turn", turn_id))
         self._current = turn_id
         self._render()
@@ -273,6 +276,8 @@ class Bridge(QObject):
         else:
             return
         view.gate, view.gate_id = None, None
+        if action != "abort":
+            view.mark_resumed()
         self._render()
         self.worker.answer_gate(decision)
 

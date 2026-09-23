@@ -483,3 +483,26 @@ def test_a_broken_config_file_is_reported_not_fatal(bridges, cfg_path):
     assert st["state"] == "error" and st["label"] == "Config error"
     assert b.worker is None and p.last("addUser") is None
     assert cfg_path.read_text() == "{not json"
+
+
+def _first_plan_render(p):
+    return next(v for v in p.all("renderTurn") if v["stages"])
+
+
+@pytest.mark.parametrize("batch, first", [(False, "pending"), (True, "running")])
+def test_plan_starts_the_stage_clock_only_in_batch_mode(qtbot, bridges, cfg_path, batch, first):
+    b, p = make(bridges, cfg_path, {})
+    b.saveSettings(json.dumps({"batch": batch}))
+    first_turn(qtbot, b, p)
+    assert _first_plan_render(p)["stages"][0]["status"] == first
+
+
+def test_approving_the_plan_shows_the_first_stage_running_at_once(qtbot, bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    b.probe()
+    b.send("x")
+    gate = wait_gate(qtbot, p)
+    b.gate(gate["id"], "approve", "")
+    right_after = vm(p)                      # rendered by gate() itself, before any worker event
+    assert right_after["gate"] is None and right_after["stages"][0]["status"] == "running"
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)

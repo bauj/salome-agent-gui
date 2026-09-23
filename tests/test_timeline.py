@@ -84,9 +84,9 @@ def test_view_model_shape_for_a_fresh_plan():
         "id": 3,
         "stages": [
             {"index": 0, "module": "geom", "icon": None, "intent": "two boxes", "status": "pending",
-             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None},
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": []},
             {"index": 1, "module": "smesh", "icon": None, "intent": "mesh", "status": "pending",
-             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None}],
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": []}],
         "edits": [], "gate": None, "status": "running", "message": "", "objects": [],
         "files": {"result_py": None, "report_md": None}, "usage": None}
 
@@ -163,3 +163,55 @@ def test_view_model_edit_ops():
         {"op": "replay", "nodes": ["n2", "n3"]},
         {"op": "add", "node": "n5", "new": "make_box"},
         {"op": "delete", "nodes": ["n6", "n7"]}]
+
+
+def test_stage_clock_starts_when_the_previous_stage_ends():
+    # the engine sends stage_start only after the stage's work is done
+    ticks = iter([100.0, 151.0, 181.0])
+    v = RunView(clock=lambda: next(ticks), batch=True)                 # no approval gate
+    v.apply(ev("plan", stages=PLAN))                                    # 100
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
+    v.apply(ev("stage_done", index=0, names=["b1"]))                   # 151
+    v.apply(ev("stage_start", index=1, module="smesh", intent="mesh"))
+    v.apply(ev("stage_done", index=1, names=["m1"]))                   # 181
+    stages = v.to_view_model(0)["stages"]
+    assert [(s["started_at"], s["elapsed_s"]) for s in stages] == [(100.0, 51.0), (151.0, 30.0)]
+
+
+def test_approving_the_plan_restarts_the_stage_clock():
+    ticks = iter([130.0, 160.0])
+    v = RunView(clock=lambda: next(ticks))
+    v.apply(ev("plan", stages=PLAN))
+    v.mark_resumed()                                                    # 130: plan approved
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
+    v.apply(ev("stage_done", index=0, names=[]))                       # 160
+    s = v.to_view_model(0)["stages"][0]
+    assert (s["started_at"], s["elapsed_s"]) == (130.0, 30.0)
+
+
+def test_next_stage_shows_running_before_its_late_stage_start():
+    ticks = iter([130.0])
+    v = RunView(clock=lambda: next(ticks))
+    v.apply(ev("plan", stages=PLAN))
+    v.gate, v.gate_id = {"plan": PLAN}, 1
+    assert [s["status"] for s in v.to_view_model(0)["stages"]] == ["pending", "pending"]
+    v.gate, v.gate_id = None, None
+    v.mark_resumed()
+    stages = v.to_view_model(0)["stages"]
+    assert [(s["status"], s["started_at"]) for s in stages] == [("running", 130.0), ("pending", None)]
+
+
+def test_finished_turn_shows_no_guessed_running_stage():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    v.apply(ev("aborted"))
+    assert [s["status"] for s in v.to_view_model(0)["stages"]] == ["pending", "pending"]
+
+
+def test_each_stage_lists_the_objects_it_made():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
+    v.apply(ev("stage_done", index=0, names=["sa_0123456789ab_box_1", "sa_0123456789ab_box_2"]))
+    stages = v.to_view_model(0)["stages"]
+    assert stages[0]["objects"] == ["box_1", "box_2"] and stages[1]["objects"] == []
