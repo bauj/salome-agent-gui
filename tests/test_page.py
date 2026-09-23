@@ -221,3 +221,17 @@ def test_theme_button_flips_the_theme_and_stays_enabled_while_busy(qtbot, page):
     assert run_js(qtbot, view, "document.getElementById('btn-theme').dataset.tip") == "Light theme"
     run_js(qtbot, view, "document.getElementById('btn-theme').click(); true")
     qtbot.waitUntil(lambda: ("saveSettings", {"theme": "light"}) in fake.calls, timeout=3000)
+
+
+def test_approved_plan_shows_the_next_step_as_processing(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", PLAN_VM)
+    wait_js(qtbot, view, "document.querySelectorAll('.step').length === 2")
+    assert run_js(qtbot, view, "document.querySelectorAll('.step .st.run').length") == 0
+    fake.emit("renderTurn", dict(PLAN_VM, gate=None))           # approved, stage not started
+    wait_js(qtbot, view, "!document.querySelector('[data-action=approve]')")
+    assert run_js(qtbot, view, "[...document.querySelectorAll('.step > .st')]"
+                               ".map(e => e.className).join('|')") == "st run|st pend"
+    assert run_js(qtbot, view, "!!document.querySelector('.step .st.run svg.spin')") is True
+    assert run_js(qtbot, view, "[...document.querySelectorAll('.step')]"
+                               ".map(e => e.className).join('|')") == "step|step pending"
