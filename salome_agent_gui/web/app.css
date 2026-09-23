@@ -347,3 +347,8 @@ body.settings-open .drawer { transform: none; }
 .conn-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--ok-soft); color: var(--ok); font-size: 13px; }
 .conn-card.off { background: var(--err-soft); color: var(--err); }
 .path { font-family: var(--mono); font-size: 12px; color: var(--text-2); word-break: break-all; }
+
+/* header theme button: show the theme a click switches to */
+#btn-theme .i-sun { display: none; }
+[data-theme="dark"] #btn-theme .i-sun { display: block; }
+[data-theme="dark"] #btn-theme .i-moon { display: none; }

@@ -206,3 +206,18 @@ def test_theme_push_sets_the_theme(qtbot, page):
     view, fake = page
     fake.emit("setTheme", {"theme": "dark"})
     wait_js(qtbot, view, "document.documentElement.dataset.theme === 'dark'")
+
+
+def test_theme_button_flips_the_theme_and_stays_enabled_while_busy(qtbot, page):
+    view, fake = page
+    fake.emit("setTheme", {"theme": "light"})
+    fake.emit("setBusy", BUSY)
+    wait_js(qtbot, view, "document.getElementById('send').classList.contains('stop')")
+    assert run_js(qtbot, view, "document.getElementById('btn-theme').disabled") is False
+    run_js(qtbot, view, "document.getElementById('btn-theme').click(); true")
+    qtbot.waitUntil(lambda: ("saveSettings", {"theme": "dark"}) in fake.calls, timeout=3000)
+    fake.emit("setTheme", {"theme": "dark"})
+    wait_js(qtbot, view, "document.documentElement.dataset.theme === 'dark'")
+    assert run_js(qtbot, view, "document.getElementById('btn-theme').dataset.tip") == "Light theme"
+    run_js(qtbot, view, "document.getElementById('btn-theme').click(); true")
+    qtbot.waitUntil(lambda: ("saveSettings", {"theme": "light"}) in fake.calls, timeout=3000)
