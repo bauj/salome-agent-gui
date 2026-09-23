@@ -232,3 +232,13 @@ def test_a_running_stage_mid_turn_is_not_stopped():
     v.apply(ev("plan", stages=PLAN))
     v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
     assert v.to_view_model(0)["stages"][0]["status"] == "running"
+
+
+def test_turn_done_usage_counts_for_a_turn_with_no_report():
+    v = RunView(usage_base=USAGE_3)
+    v.apply(ev("aborted"))
+    v.apply(ev("turn_done", turn=1, status="failed", message="turn cancelled",
+               usage={"calls": 5, "prompt_tokens": 1800, "completion_tokens": 160,
+                      "llm_seconds": 4.3}))
+    assert v.to_view_model(1)["usage"] == {"calls": 2, "prompt_tokens": 800,
+                                           "completion_tokens": 60, "llm_seconds": 2.8}

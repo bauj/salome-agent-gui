@@ -98,6 +98,8 @@ class RunView:
             self.edit_ops.append({"op": "replay", "nodes": nodes})
         elif kind == "turn_done":
             self.turn_status, self.turn_message = d.get("status"), d.get("message")
+            if d.get("usage"):                  # totals so far, cancelled turns included
+                self.usage = dict(d["usage"])
             self.finished = True
         elif kind == "fatal":
             self.fatal = d.get("message")

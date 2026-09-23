@@ -36,6 +36,9 @@ class FakeConv:
         def ev(kind, **data):
             on_event({"kind": kind, "run_id": "r", "data": data})
 
+        usage = {"calls": 3 * (n + 1), "prompt_tokens": 1000 * (n + 1),
+                 "completion_tokens": 100 * (n + 1), "llm_seconds": 1.5 * (n + 1)}
+
         ev("turn_start", turn=n, text=text)
         if self.release is not None:
             while not self.release.is_set():
@@ -44,24 +47,22 @@ class FakeConv:
             status, self.next_status = self.next_status, None
             self.degraded = status == "degraded"
             self.ended = status == "ended"
-            ev("turn_done", turn=n, status=status, message=f"{status} happened")
+            ev("turn_done", turn=n, status=status, message=f"{status} happened", usage=usage)
             return TurnResult(status, f"{status} happened", {})
         if n == 0:
             ev("plan", stages=PLAN)
             rec["decision"] = on_gate(rec.get("first_gate", {"plan": PLAN}))
             if rec["decision"]["action"] not in ("approve", "edit", "hint", "skip"):
                 ev("aborted")
-                ev("turn_done", turn=n, status="failed", message="turn cancelled")
+                ev("turn_done", turn=n, status="failed", message="turn cancelled", usage=usage)
                 return TurnResult("failed", "turn cancelled", {})
             ev("stage_start", index=0, module="geom", intent="box")
             ev("stage_done", index=0, names=["sa_0123456789ab_box_1"])
         else:
             ev("graph_edit", op="edit", node="n1", param="dz", old=40, new=60)
             ev("replay", nodes=["n1"])
-        usage = {"calls": 3 * (n + 1), "prompt_tokens": 1000 * (n + 1),
-                 "completion_tokens": 100 * (n + 1), "llm_seconds": 1.5 * (n + 1)}
         ev("report", result_py="/w/result.py", report_md="/w/report.md", text="", usage=usage)
-        ev("turn_done", turn=n, status="ok", message=f"did {text}")
+        ev("turn_done", turn=n, status="ok", message=f"did {text}", usage=usage)
         return TurnResult("ok", f"did {text}", {})
 
     def undo(self):
