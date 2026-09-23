@@ -58,3 +58,42 @@ def save_raw(path: Path, text: str) -> None:
         probe.write_text(json.dumps(data))
         load(probe)
     _write(Path(path), data)
+
+
+THEMES = ("system", "light", "dark")
+ON_FAILURE = ("abort", "continue")
+TOOL_SELECTION = ("hints", "all")
+
+
+def read_settings(path: Path) -> dict:
+    data = json.loads(Path(path).read_text())
+    llm, policy, gui = data.get("llm", {}), data.get("policy", {}), data.get("gui", {})
+    return {
+        **{k: llm.get(k, "") or "" for k in KEY_FIELDS},
+        "on_stage_failure": policy.get("on_stage_failure") if policy.get("on_stage_failure") in ON_FAILURE else "abort",
+        "tool_selection": policy.get("tool_selection") if policy.get("tool_selection") in TOOL_SELECTION else "hints",
+        "batch": bool(gui.get("batch", False)),
+        "verbose": int(gui.get("verbose", 0) or 0),
+        "theme": gui.get("theme") if gui.get("theme") in THEMES else "system",
+    }
+
+
+def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None:
+    """Key fields and theme always; run options (policy + gui batch/verbose)
+    only when `run_options` — they are fixed while a conversation is open."""
+    data = json.loads(Path(path).read_text())
+    data.setdefault("llm", {}).update({k: fields[k] for k in KEY_FIELDS if k in fields})
+    gui = data.setdefault("gui", {})
+    if fields.get("theme") in THEMES:
+        gui["theme"] = fields["theme"]
+    if run_options:
+        policy = data.setdefault("policy", {})
+        if fields.get("on_stage_failure") in ON_FAILURE:
+            policy["on_stage_failure"] = fields["on_stage_failure"]
+        if fields.get("tool_selection") in TOOL_SELECTION:
+            policy["tool_selection"] = fields["tool_selection"]
+        if "batch" in fields:
+            gui["batch"] = bool(fields["batch"])
+        if "verbose" in fields:
+            gui["verbose"] = max(0, min(2, int(fields["verbose"])))
+    _write(Path(path), data)
