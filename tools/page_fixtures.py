@@ -60,7 +60,7 @@ class FakeBridge(QObject):
 
 def _stage(index, module, intent, **kw):
     s = {"index": index, "module": module, "icon": None, "intent": intent, "status": "pending",
-         "attempts": 0, "started_at": None, "elapsed_s": None, "error": None}
+         "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": []}
     s.update(kw)
     return s
 
@@ -94,8 +94,9 @@ IDLE_OPEN = {"busy": False, "stopping": False, "open": True, "degraded": False, 
 BUSY = {"busy": True, "stopping": False, "open": True, "degraded": False, "can_send": False}
 
 DONE_VM = _vm(0, status="ok", stages=[
-    _stage(0, "geom", BODY, status="ok", attempts=1, elapsed_s=12.0),
-    _stage(1, "geom", WHEELS, status="ok", attempts=2, elapsed_s=75.0)],
+    _stage(0, "geom", BODY, status="ok", attempts=1, elapsed_s=12.0, objects=["fuse_1"]),
+    _stage(1, "geom", WHEELS, status="ok", attempts=2, elapsed_s=75.0,
+           objects=["mtr_1_solid_1", "mtr_1_solid_2", "mtr_1_solid_3", "mtr_1_solid_4"])],
     objects=["fuse_1", "mtr_1_solid_1", "mtr_1_solid_2", "mtr_1_solid_3", "mtr_1_solid_4"],
     files={"result_py": "/tmp/run/result.py", "report_md": "/tmp/run/report.md"},
     usage={"calls": 18, "prompt_tokens": 70819, "completion_tokens": 14763, "llm_seconds": 90.2})

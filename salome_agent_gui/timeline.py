@@ -21,6 +21,7 @@ class StageRow:
     error: str | None = None
     started_at: float | None = None
     elapsed_s: float | None = None
+    objects: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -42,6 +43,14 @@ class RunView:
     edit_ops: list[dict] = field(default_factory=list)
     usage_base: dict | None = None
     clock: Callable[[], float] = field(default=time.time, repr=False)
+    batch: bool = False
+    # The engine sends stage_start only once the stage's work is done, so a
+    # stage's clock starts when the engine moved on to it: plan approved (or
+    # the plan itself in batch mode, which has no gate) or previous stage over.
+    _next_start: float | None = field(default=None, repr=False)
+
+    def mark_resumed(self) -> None:
+        self._next_start = self.clock()
 
     def _row(self, i: int, module: str = "?", intent: str = "") -> StageRow:
         while len(self.stages) <= i:
@@ -54,10 +63,12 @@ class RunView:
         if kind == "plan":
             self.stages = [StageRow(i, s.get("module", "?"), s.get("intent", ""))
                            for i, s in enumerate(d["stages"])]
+            self._next_start = self.clock() if self.batch else None
         elif kind == "stage_start":
             r = self._row(d["index"], d.get("module", "?"), d.get("intent", ""))
             r.status = "running"
-            r.started_at = self.clock()
+            r.started_at = self._next_start if self._next_start is not None else self.clock()
+            self._next_start = None
         elif kind == "stage_attempt":
             r = self._row(d["index"])
             r.attempts += 1
@@ -65,11 +76,15 @@ class RunView:
         elif kind == "stage_done":
             r = self._row(d["index"])
             r.status, r.error = "ok", None
+            now = self.clock()
             if r.started_at is not None:
-                r.elapsed_s = round(self.clock() - r.started_at, 1)
-            self.objects.extend(d.get("names") or [])
+                r.elapsed_s = round(now - r.started_at, 1)
+            r.objects = list(d.get("names") or [])
+            self.objects.extend(r.objects)
+            self._next_start = now
         elif kind == "stage_skipped":
             self._row(d["index"]).status = "skipped"
+            self._next_start = self.clock()
         elif kind == "report":
             self.result_py, self.report_md = d.get("result_py"), d.get("report_md")
             self.usage = dict(d["usage"]) if d.get("usage") else None
@@ -125,13 +140,26 @@ class RunView:
                 "stage": failing[-1] if failing else None,
                 "message": str(err.get("message") or ""), "line": err.get("offending_line")}
 
+    def _moved_on_to(self) -> int | None:
+        """Index of the stage the engine is working on but has not reported yet."""
+        if (self._next_start is None or self.gate is not None or self.status() != "running"
+                or any(s.status in ("running", "failed") for s in self.stages)):
+            return None
+        return next((s.index for s in self.stages if s.status == "pending"), None)
+
+    def _stage_view(self, s: StageRow, icon_for) -> dict:
+        status, started_at = s.status, s.started_at
+        if s.index == self._moved_on_to():
+            status, started_at = "running", self._next_start
+        return {"index": s.index, "module": s.module, "icon": icon_for(s.module),
+                "intent": s.intent, "status": status, "attempts": s.attempts,
+                "started_at": started_at, "elapsed_s": s.elapsed_s, "error": s.error,
+                "objects": [short_name(n) for n in s.objects]}
+
     def to_view_model(self, turn_id: int, icon_for=lambda module: None) -> dict:
         return {
             "id": turn_id,
-            "stages": [{"index": s.index, "module": s.module, "icon": icon_for(s.module),
-                        "intent": s.intent, "status": s.status, "attempts": s.attempts,
-                        "started_at": s.started_at, "elapsed_s": s.elapsed_s, "error": s.error}
-                       for s in self.stages],
+            "stages": [self._stage_view(s, icon_for) for s in self.stages],
             "edits": [dict(e) for e in self.edit_ops],
             "gate": self._gate_view(),
             "status": self.status(),
