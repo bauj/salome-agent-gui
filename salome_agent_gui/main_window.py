@@ -326,7 +326,8 @@ class MainWindow(QMainWindow):
         self._degraded = bool(payload.get("degraded"))
         command = payload.get("command")
         if command != "turn":
-            self.chat.add_note(f"{command}: {payload.get('message', '')}")
+            failed = " failed" if payload.get("status") == "failed" else ""
+            self.chat.add_note(f"{command}{failed}: {payload.get('message', '')}")
         elif self._view is not None:
             if self._view.turn_status is None:
                 self._view.turn_status = payload.get("status")
