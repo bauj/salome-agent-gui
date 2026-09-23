@@ -163,10 +163,11 @@ button { font: inherit; }
 .st.stopped { background: var(--surface-2); color: var(--text-3); }
 .st.stopped svg { width: 9px; height: 9px; }
 .step .main { flex: 1; min-width: 0; }
-.step .line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.step .intent { color: var(--text); word-break: break-word; }
+.step .line { display: flex; gap: 8px; align-items: flex-start; }
+.step .line > .mod, .step .line > .badge { flex: none; }
+.step .intent { flex: 1; min-width: 0; color: var(--text); word-break: break-word; line-height: 20px; }
 .step.pending .intent { color: var(--text-2); }
-.step .meta { color: var(--text-3); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.step .meta { flex: none; color: var(--text-3); font-size: 12px; line-height: 20px; margin-left: auto; white-space: nowrap; }
 .err {
   margin-top: 6px; padding: 8px 10px; border-radius: 8px;
   background: var(--err-soft); color: var(--err); font-size: 12.5px; white-space: pre-wrap;
