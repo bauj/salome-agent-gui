@@ -155,7 +155,12 @@ class Bridge(QObject):
             return
         if not isinstance(fields, dict):
             return
-        config_store.save_settings(self.config_path, fields, run_options=self.worker is None)
+        try:
+            config_store.save_settings(self.config_path, fields, run_options=self.worker is None)
+        except (OSError, ValueError) as e:
+            self._status = {"state": "error", "label": "Config error", "detail": str(e)}
+            self._emit("setStatus", self._status)
+            return
         self._emit("setSettings", self._settings())
         self._emit("setTheme", self._theme())
         if not self.server_error:

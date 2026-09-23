@@ -102,3 +102,16 @@ def test_gui_section_is_accepted_by_the_agent_config_loader(tmp_path):
     user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
     cs.save_settings(user, {"base_url": "http://h", "model": "m", "theme": "dark"})
     assert cs.load(user)["llm"]["model"] == "m"
+
+
+@pytest.mark.parametrize("text", ["{not json", "[1, 2]", '{"llm": null, "gui": 3}',
+                                  '{"gui": {"verbose": "lots"}}'])
+def test_read_settings_falls_back_to_defaults_on_a_broken_file(tmp_path, text):
+    path = tmp_path / "u.json"
+    path.write_text(text)
+    s = cs.read_settings(path)
+    assert (s["model"], s["verbose"], s["theme"]) == ("", 0, "system")
+
+
+def test_read_settings_of_a_missing_file_gives_defaults(tmp_path):
+    assert cs.read_settings(tmp_path / "gone.json")["on_stage_failure"] == "abort"

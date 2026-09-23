@@ -471,3 +471,15 @@ def test_cancelled_edit_re_renders_the_turn(qtbot, bridges, cfg_path):
     n = len(p.all("renderTurn"))
     b.gate(gate["id"], "edit", "")
     assert len(p.all("renderTurn")) == n + 1 and vm(p)["gate"] == gate
+
+
+def test_a_broken_config_file_is_reported_not_fatal(bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    cfg_path.write_text("{not json")
+    b.probe()
+    b.saveSettings(json.dumps({"model": "m2"}))
+    b.send("make a box")
+    st = p.last("setStatus")
+    assert st["state"] == "error" and st["label"] == "Config error"
+    assert b.worker is None and p.last("addUser") is None
+    assert cfg_path.read_text() == "{not json"
