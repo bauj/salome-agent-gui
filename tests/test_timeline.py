@@ -156,3 +156,12 @@ def test_first_turn_keeps_its_object_list():
 
 def test_note_escapes_markdown():
     assert render_note(Note("undo: [x](gate:abort)")) == "_undo: \\[x\\]\\(gate:abort\\)_"
+
+
+def test_report_usage_is_a_snapshot_not_the_live_counter():
+    usage = {"calls": 8}
+    v = RunView()
+    v.apply(ev("report", result_py="/w/r1/result.py", report_md="/w/r1/report.md", text="",
+               usage=usage))
+    usage["calls"] = 17
+    assert "calls=8" in render_run(v)

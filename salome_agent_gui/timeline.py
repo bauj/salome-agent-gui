@@ -57,7 +57,7 @@ class RunView:
             self._row(d["index"]).status = "skipped"
         elif kind == "report":
             self.result_py, self.report_md = d.get("result_py"), d.get("report_md")
-            self.usage = d.get("usage")
+            self.usage = dict(d["usage"]) if d.get("usage") else None
             self.finished = True
         elif kind == "graph_edit":
             self.edits.append(_edit_line(d))
