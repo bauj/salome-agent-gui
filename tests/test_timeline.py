@@ -165,3 +165,116 @@ def test_report_usage_is_a_snapshot_not_the_live_counter():
                usage=usage))
     usage["calls"] = 17
     assert "calls=8" in render_run(v)
+
+
+from salome_agent_gui.timeline import short_name
+
+USAGE_3 = {"calls": 3, "prompt_tokens": 1000, "completion_tokens": 100, "llm_seconds": 1.5}
+
+
+def test_short_name_strips_only_the_run_prefix():
+    assert short_name("sa_0123456789ab_fuse_1") == "fuse_1"
+    assert short_name("fuse_1") == "fuse_1"
+    assert short_name("sa_xyz_fuse_1") == "sa_xyz_fuse_1"
+
+
+def test_view_model_stage_times_come_from_the_clock():
+    ticks = iter([100.0, 112.54])
+    v = RunView(clock=lambda: next(ticks))
+    v.apply(ev("plan", stages=PLAN))
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
+    s = v.to_view_model(0)["stages"][0]
+    assert (s["status"], s["started_at"], s["elapsed_s"]) == ("running", 100.0, None)
+    v.apply(ev("stage_done", index=0, names=["sa_0123456789ab_box_1"]))
+    vm = v.to_view_model(0)
+    assert vm["stages"][0]["elapsed_s"] == 12.5
+    assert vm["objects"] == ["box_1"]
+    assert vm["status"] == "running"
+
+
+def test_view_model_shape_for_a_fresh_plan():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    assert v.to_view_model(3) == {
+        "id": 3,
+        "stages": [
+            {"index": 0, "module": "geom", "icon": None, "intent": "two boxes", "status": "pending",
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None},
+            {"index": 1, "module": "smesh", "icon": None, "intent": "mesh", "status": "pending",
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None}],
+        "edits": [], "gate": None, "status": "running", "message": "", "objects": [],
+        "files": {"result_py": None, "report_md": None}, "usage": None}
+
+
+def test_view_model_icons_come_from_the_lookup():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    vm = v.to_view_model(0, icon_for=lambda m: f"file:///i/{m}.png")
+    assert [s["icon"] for s in vm["stages"]] == ["file:///i/geom.png", "file:///i/smesh.png"]
+
+
+def test_view_model_usage_is_this_turn_only():
+    v = RunView(usage_base=USAGE_3)
+    v.apply(ev("report", result_py=None, report_md=None, text="",
+               usage={"calls": 5, "prompt_tokens": 1800, "completion_tokens": 160,
+                      "llm_seconds": 4.3, "metered_calls": 5, "approx_prompt_tokens": 9}))
+    assert v.to_view_model(1)["usage"] == {"calls": 2, "prompt_tokens": 800,
+                                           "completion_tokens": 60, "llm_seconds": 2.8}
+
+
+def test_view_model_usage_without_base_is_the_whole_count_and_none_without_report():
+    v = RunView()
+    assert v.to_view_model(0)["usage"] is None
+    v.apply(ev("report", result_py=None, report_md=None, text="", usage=dict(USAGE_3)))
+    assert v.to_view_model(0)["usage"] == USAGE_3
+
+
+def test_view_model_gates():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    v.gate, v.gate_id = {"plan": PLAN}, 4
+    assert v.to_view_model(0)["gate"] == {"id": 4, "kind": "plan"}
+    v.apply(ev("stage_start", index=1, module="smesh", intent="mesh"))
+    v.apply(ev("stage_attempt", index=1, phase="exec", ok=False, error="NETGEN failed\nline 2"))
+    v.gate, v.gate_id = {"last_error": {"message": "NETGEN failed\nline 2", "offending_line": 12}}, 5
+    assert v.to_view_model(0)["gate"] == {"id": 5, "kind": "stage_failed", "stage": 1,
+                                          "message": "NETGEN failed\nline 2", "line": 12}
+    assert v.to_view_model(0)["stages"][1]["error"] == "NETGEN failed\nline 2"
+    v.gate, v.gate_id = None, None
+    assert v.to_view_model(0)["gate"] is None
+
+
+def test_view_model_status_and_message():
+    v = RunView()
+    assert v.status() == "running"
+    v.apply(ev("report", result_py="/w/r.py", report_md="/w/r.md", text="", usage=None))
+    assert v.status() == "ok"
+    v = RunView()
+    v.apply(ev("fatal", message="LLM endpoint down"))
+    vm = v.to_view_model(0)
+    assert (vm["status"], vm["message"]) == ("fatal", "LLM endpoint down")
+    v.apply(ev("turn_done", turn=0, status="failed", message="turn failed: endpoint"))
+    vm = v.to_view_model(0)
+    assert (vm["status"], vm["message"]) == ("failed", "turn failed: endpoint")
+
+
+def test_aborted_run_keeps_its_files():
+    v = RunView()
+    v.apply(ev("report", result_py="/w/r.py", report_md="/w/r.md", text="", usage=None))
+    v.apply(ev("aborted"))
+    vm = v.to_view_model(0)
+    assert vm["status"] == "aborted"
+    assert vm["files"] == {"result_py": "/w/r.py", "report_md": "/w/r.md"}
+
+
+def test_view_model_edit_ops():
+    v = RunView()
+    v.apply(ev("graph_edit", op="edit", node="n2", param="dz", old=40, new=60))
+    v.apply(ev("replay", nodes=["n2", "n3"]))
+    v.apply(ev("graph_edit", op="add", node="n5", new="make_box"))
+    v.apply(ev("graph_edit", op="delete", old=["n6", "n7"]))
+    assert v.to_view_model(0)["edits"] == [
+        {"op": "edit", "node": "n2", "param": "dz", "old": "40", "new": "60"},
+        {"op": "replay", "nodes": ["n2", "n3"]},
+        {"op": "add", "node": "n5", "new": "make_box"},
+        {"op": "delete", "nodes": ["n6", "n7"]}]
