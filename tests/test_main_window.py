@@ -341,3 +341,13 @@ def test_server_error_disables_send_until_reprobe(qtbot, cfg_path):
     w._probe_fn = lambda: {"mode": "gui", "port": 4242}
     w.probe()
     assert w.send_btn.isEnabled()
+
+
+def test_failed_undo_note_says_it_failed(qtbot, cfg_path):
+    rec = {}
+    w = make(qtbot, cfg_path, rec)
+    first_turn(qtbot, w)
+    rec["conv"].undo = lambda: TurnResult("failed", "nothing to undo", {})
+    w.undo_btn.click()
+    qtbot.waitUntil(lambda: not w._busy, timeout=3000)
+    assert "_undo failed: nothing to undo_" in w.chat.markdown()
