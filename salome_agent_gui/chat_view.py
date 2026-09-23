@@ -2,7 +2,15 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QTextBrowser
 
-from salome_agent_gui.timeline import RunView, render_run, render_user
+from salome_agent_gui.timeline import Note, RunView, render_note, render_run, render_user
+
+
+def _render(item) -> str:
+    if isinstance(item, RunView):
+        return render_run(item)
+    if isinstance(item, Note):
+        return render_note(item)
+    return render_user(item)
 
 
 class ChatView(QTextBrowser):
@@ -25,11 +33,15 @@ class ChatView(QTextBrowser):
         self.refresh()
         return view
 
+    def add_note(self, text: str) -> None:
+        self._items.append(Note(text))
+        self.refresh()
+
     def markdown(self) -> str:
         return self._md
 
     def refresh(self) -> None:
-        parts = [render_run(i) if isinstance(i, RunView) else render_user(i) for i in self._items]
+        parts = [_render(i) for i in self._items]
         self._md = "\n\n---\n\n".join(parts)
         self.setMarkdown(self._md)
         bar = self.verticalScrollBar()
