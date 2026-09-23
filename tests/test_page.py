@@ -243,3 +243,14 @@ def test_the_page_draws_pending_steps_as_pending(qtbot, page):
     wait_js(qtbot, view, "!document.querySelector('[data-action=approve]')")
     assert run_js(qtbot, view, "[...document.querySelectorAll('.step > .st')]"
                                ".map(e => e.className).join('|')") == "st pend|st pend"
+
+
+def test_stopped_step_does_not_spin(qtbot, page):
+    view, fake = page
+    stages = [dict(PLAN_VM["stages"][0], status="stopped", started_at=time.time() - 5),
+              PLAN_VM["stages"][1]]
+    fake.emit("renderTurn", dict(PLAN_VM, gate=None, status="failed", stages=stages))
+    wait_js(qtbot, view, "document.querySelectorAll('.step').length === 2")
+    assert run_js(qtbot, view, "document.querySelector('.step > .st').className") == "st stopped"
+    assert run_js(qtbot, view, "!!document.querySelector('.step svg.spin')") is False
+    assert run_js(qtbot, view, "document.querySelector('.step .meta').textContent") == "stopped"

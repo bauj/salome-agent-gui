@@ -160,6 +160,8 @@ button { font: inherit; }
 .st.fail { background: var(--err-soft); color: var(--err); }
 .st.pend { border: 1.5px dashed var(--text-3); }
 .st.skip { background: var(--surface-2); color: var(--text-3); }
+.st.stopped { background: var(--surface-2); color: var(--text-3); }
+.st.stopped svg { width: 9px; height: 9px; }
 .step .main { flex: 1; min-width: 0; }
 .step .line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .step .intent { color: var(--text); word-break: break-word; }
