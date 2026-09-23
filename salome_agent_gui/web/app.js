@@ -248,7 +248,9 @@ function resultBlock(vm) {
   }
   r.appendChild(line);
   if (msg && block && vm.status !== "ok") r.appendChild(el("div", "err", msg));
-  if (vm.objects.length) {
+  const underSteps = new Set();
+  for (const st of vm.stages) for (const name of st.objects || []) underSteps.add(name);
+  if (vm.objects.length && !vm.objects.every((name) => underSteps.has(name))) {
     const d = el("details", "objects");
     const s = el("summary");
     svg(s, "chevron");
@@ -301,6 +303,7 @@ function turnNode(vm) {
     body.appendChild(t);
   }
   if (vm.stages.length) body.appendChild(stagesCard(vm));
+  else if (gate && gate.kind === "plan") body.appendChild(planFoot(gate));   // never leave no way out
   if (vm.edits.length) body.appendChild(editsCard(vm.edits));
   if (gate && gate.kind === "stage_failed") body.appendChild(failCard(vm, gate));
   if (!gate && vm.status !== "running") body.appendChild(resultBlock(vm));
