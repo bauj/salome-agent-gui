@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "salome-agent-gui"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["salome-agent", "PyQt5"]
+dependencies = ["salome-agent", "PyQt5", "PyQt5-Qt5==5.15.19", "PyQtWebEngine==5.15.7",
+                "PyQtWebEngine-Qt5==5.15.19"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt"]
@@ -18,4 +19,4 @@ salome-agent-gui = "salome_agent_gui.app:main"
 packages = ["salome_agent_gui"]
 
 [tool.setuptools.package-data]
-salome_agent_gui = ["config.example.json"]
+salome_agent_gui = ["config.example.json", "web/*"]
