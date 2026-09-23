@@ -88,9 +88,18 @@ function answer(gate, action, text, container) {
   bridge.gate(gate.id, action, text || "");
 }
 
+// Between an approval (or a finished stage) and the next stage_start the
+// engine is already working on the next pending step: show it spinning.
+function nextStepIndex(vm) {
+  if (vm.status !== "running" || vm.gate || vm.stages.some((s) => s.status === "running")) return -1;
+  const next = vm.stages.find((s) => s.status === "pending");
+  return next ? next.index : -1;
+}
+
 function stepRow(s, vm) {
-  const li = el("li", "step" + (s.status === "pending" ? " pending" : ""));
-  const [cls, icon] = STEP[s.status] || STEP.pending;
+  const shown = s.status === "pending" && s.index === nextStepIndex(vm) ? "running" : s.status;
+  const li = el("li", "step" + (shown === "pending" ? " pending" : ""));
+  const [cls, icon] = STEP[shown] || STEP.pending;
   const st = el("span", cls);
   if (icon) svg(st, icon);
   li.appendChild(st);
