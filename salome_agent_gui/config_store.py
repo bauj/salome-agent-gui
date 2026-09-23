@@ -65,15 +65,32 @@ ON_FAILURE = ("abort", "continue")
 TOOL_SELECTION = ("hints", "all")
 
 
+def _section(data, name: str) -> dict:
+    value = data.get(name) if isinstance(data, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _verbose(value) -> int:
+    try:
+        return max(0, min(2, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def read_settings(path: Path) -> dict:
-    data = json.loads(Path(path).read_text())
-    llm, policy, gui = data.get("llm", {}), data.get("policy", {}), data.get("gui", {})
+    """Never raises: a missing or broken file reads as defaults, and the
+    conversation start (config_store.load) reports the real error."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        data = {}
+    llm, policy, gui = _section(data, "llm"), _section(data, "policy"), _section(data, "gui")
     return {
         **{k: llm.get(k, "") or "" for k in KEY_FIELDS},
         "on_stage_failure": policy.get("on_stage_failure") if policy.get("on_stage_failure") in ON_FAILURE else "abort",
         "tool_selection": policy.get("tool_selection") if policy.get("tool_selection") in TOOL_SELECTION else "hints",
         "batch": bool(gui.get("batch", False)),
-        "verbose": int(gui.get("verbose", 0) or 0),
+        "verbose": _verbose(gui.get("verbose")),
         "theme": gui.get("theme") if gui.get("theme") in THEMES else "system",
     }
 
