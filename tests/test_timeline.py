@@ -1,4 +1,4 @@
-from salome_agent_gui.timeline import RunView, render_run, render_user
+from salome_agent_gui.timeline import Note, RunView, render_note, render_run, render_user
 
 PLAN = [{"module": "geom", "intent": "two boxes"}, {"module": "smesh", "intent": "mesh"}]
 
@@ -103,3 +103,56 @@ def test_object_name_with_backtick_cannot_break_code_span():
     v.apply(ev("report", result_py="/w/r1/result.py", report_md="/w/r1/report.md", text="# r"))
     md = render_run(v)
     assert "`x'[a](gate:abort)'`" in md
+
+
+def test_amend_turn_renders_edits_and_outcome():
+    v = RunView()
+    v.apply(ev("turn_start", turn=1, text="make the roof taller"))
+    v.apply(ev("graph_edit", op="edit", node="n2", param="dz", old=40, new=60))
+    v.apply(ev("replay", nodes=["n2", "n3", "n4"]))
+    v.apply(ev("graph_edit", op="add", node="n5", new="make_box"))
+    v.apply(ev("graph_edit", op="delete", old=["n6", "n7"]))
+    v.apply(ev("report", result_py="/w/r1/result.py", report_md="/w/r1/report.md", text="# r"))
+    v.apply(ev("turn_done", turn=1, status="ok", message="Raised the roof to 60 mm."))
+    assert v.finished
+    assert v.edits == ["edit n2.dz: 40 -> 60", "rebuilding 3 object(s): n2, n3, n4",
+                       "added n5 (make_box)", "deleted n6, n7"]
+    md = render_run(v)
+    assert "- edit n2.dz: 40 -\\> 60" in md
+    assert "- added n5 \\(make\\_box\\)" in md
+    assert "**Done.** Raised the roof to 60 mm." in md
+    assert "Objects:" not in md
+    assert "(file:///w/r1/result.py)" in md
+
+
+def test_turn_statuses_have_their_own_labels():
+    for status, label in (("needs_input", "Question:"), ("failed", "Turn failed:"),
+                          ("degraded", "Study out of sync:"), ("ended", "Session ended:")):
+        v = RunView()
+        v.apply(ev("turn_done", turn=0, status=status, message="m"))
+        assert f"**{label}** m" in render_run(v)
+
+
+def test_turn_outcome_replaces_aborted_and_fatal_lines():
+    v = RunView()
+    v.apply(ev("fatal", message="LLM endpoint down"))
+    v.apply(ev("aborted"))
+    v.apply(ev("turn_done", turn=0, status="failed", message="LLM endpoint down"))
+    md = render_run(v)
+    assert md.count("LLM endpoint down") == 1
+    assert "aborted" not in md.lower()
+    assert "**Turn failed:** LLM endpoint down" in md
+
+
+def test_first_turn_keeps_its_object_list():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN[:1]))
+    v.apply(ev("stage_done", index=0, names=["box_1"]))
+    v.apply(ev("report", result_py="/w/r1/result.py", report_md="/w/r1/report.md", text="# r"))
+    v.apply(ev("turn_done", turn=0, status="ok", message="done"))
+    md = render_run(v)
+    assert "**Done.** done" in md and "Objects: `box_1`" in md
+
+
+def test_note_escapes_markdown():
+    assert render_note(Note("undo: [x](gate:abort)")) == "_undo: \\[x\\]\\(gate:abort\\)_"
