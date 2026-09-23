@@ -87,13 +87,18 @@ def test_approve_click_reaches_the_bridge_and_disables_the_buttons(qtbot, page):
     assert run_js(qtbot, view, "document.querySelector('[data-action=abort]').disabled") is True
 
 
-def test_edit_plan_click_keeps_the_buttons_enabled(qtbot, page):
+def test_edit_plan_click_disables_the_buttons_until_the_turn_is_redrawn(qtbot, page):
     view, fake = page
     fake.emit("renderTurn", PLAN_VM)
     wait_js(qtbot, view, "!!document.querySelector('[data-action=edit]')")
-    run_js(qtbot, view, "document.querySelector('[data-action=edit]').click(); true")
+    run_js(qtbot, view, "document.querySelector('[data-action=edit]').click();"
+                        "document.querySelector('[data-action=edit]').click(); true")
     qtbot.waitUntil(lambda: ("gate", 1, "edit", "") in fake.calls, timeout=3000)
-    assert run_js(qtbot, view, "document.querySelector('[data-action=approve]').disabled") is False
+    qtbot.wait(200)
+    assert [c for c in fake.calls if c[0] == "gate"] == [("gate", 1, "edit", "")]
+    assert run_js(qtbot, view, "document.querySelector('[data-action=approve]').disabled") is True
+    fake.emit("renderTurn", PLAN_VM)                       # the bridge redraws on Cancel
+    wait_js(qtbot, view, "!document.querySelector('[data-action=approve]').disabled")
 
 
 def test_hint_needs_text_and_sends_it(qtbot, page):
