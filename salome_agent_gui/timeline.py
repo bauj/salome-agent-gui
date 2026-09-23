@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field
-from pathlib import Path
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Callable
 
 _RUN_PREFIX = re.compile(r"^sa_[0-9a-f]{12}_")
@@ -10,10 +9,6 @@ USAGE_KEYS = ("calls", "prompt_tokens", "completion_tokens", "llm_seconds")
 
 def short_name(name) -> str:
     return _RUN_PREFIX.sub("", str(name))
-
-ICON = {"pending": "·", "running": "⟳", "ok": "✓", "failed": "✗", "skipped": "↷"}
-STATUS_LABEL = {"ok": "Done.", "needs_input": "Question:", "failed": "Turn failed:",
-                "degraded": "Study out of sync:", "ended": "Session ended:"}
 
 
 @dataclass
@@ -162,91 +157,3 @@ def _edit_op(d: dict) -> dict:
     if d.get("op") == "delete":
         return {"op": "delete", "nodes": [str(n) for n in d.get("old") or []]}
     return {"op": "add", "node": str(d.get("node")), "new": str(d.get("new"))}
-
-
-@dataclass
-class Note:
-    text: str
-
-
-def _escape(text: str) -> str:
-    for ch in "\\`*_[]()<>#":
-        text = text.replace(ch, "\\" + ch)
-    return text
-
-
-def _code(text: str) -> str:
-    return "`" + text.replace("`", "'") + "`"
-
-
-def render_user(text: str) -> str:
-    return f"**You:** {_escape(text)}"
-
-
-def render_note(note: Note) -> str:
-    return f"_{_escape(note.text)}_"
-
-
-def _file_link(label: str, path: str) -> str:
-    return f"[{label}]({Path(path).as_uri()})"
-
-
-def _links_and_usage(view: RunView, lines: list[str]) -> None:
-    links = [_file_link(n, p) for n, p in (("result.py", view.result_py),
-                                           ("report.md", view.report_md)) if p]
-    if links:
-        lines.append("")
-        lines.append(" · ".join(links))
-    if view.usage:
-        nums = ", ".join(f"{k}={v}" for k, v in view.usage.items()
-                         if isinstance(v, (int, float)) and not isinstance(v, bool))
-        lines.append("")
-        lines.append(f"_LLM usage: {nums}_")
-
-
-def render_run(view: RunView) -> str:
-    lines = ["**Agent**", ""]
-    for s in view.stages:
-        tries = f" (attempt {s.attempts})" if s.attempts > 1 else ""
-        lines.append(f"{s.index + 1}. {ICON.get(s.status, '?')} {_code(s.module)} "
-                     f"{_escape(s.intent)}{tries}")
-        if s.error and s.status == "failed":
-            lines.append(f"    ↳ {_escape(s.error)}")
-    if view.edits:
-        if view.stages:
-            lines.append("")
-        lines.extend(f"- {_escape(e)}" for e in view.edits)
-    lines.append("")
-    if view.gate and "plan" in view.gate:
-        lines.append("**Approve this plan?** [Approve](gate:approve) · "
-                     "[Edit](gate:edit) · [Abort](gate:abort)")
-    elif view.gate and "last_error" in view.gate:
-        err = view.gate["last_error"] or {}
-        where = f" (line {err['offending_line']})" if err.get("offending_line") else ""
-        lines.append(f"**Stage failed{where}:** {_escape(err.get('message') or '')}")
-        lines.append("")
-        lines.append("[Hint](gate:hint) · [Skip stage](gate:skip) · [Abort run](gate:abort)")
-    if view.turn_status is not None:
-        label = STATUS_LABEL.get(view.turn_status, view.turn_status)
-        lines.append(f"**{label}** {_escape(view.turn_message or '')}")
-        if view.objects:
-            lines.append("")
-            lines.append("Objects: " + ", ".join(_code(n) for n in view.objects))
-        _links_and_usage(view, lines)
-        return "\n".join(lines)
-    if view.fatal:
-        lines.append(f"**Run failed:** {_escape(view.fatal)}")
-    if view.aborted:
-        lines.append("_Run aborted._")
-    elif view.finished:
-        if view.fatal:
-            links = [_file_link(n, p) for n, p in (("result.py", view.result_py),
-                                                   ("report.md", view.report_md)) if p]
-            if links:
-                lines.append("")
-                lines.append(" · ".join(links))
-        else:
-            objs = ", ".join(_code(n) for n in view.objects) or "none"
-            lines.append(f"**Done.** Objects: {objs}")
-            _links_and_usage(view, lines)
-    return "\n".join(lines)
