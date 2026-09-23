@@ -2,6 +2,16 @@ import sys
 
 
 def main(argv=None) -> int:
+    from PyQt5.QtCore import QCoreApplication, Qt
+
+    # Qt WebEngine must be imported, and GL context sharing switched on,
+    # before the QApplication exists.
+    try:
+        import PyQt5.QtWebEngineWidgets  # noqa: F401
+    except ImportError:
+        pass                     # web_view.create shows the fallback panel
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+
     from PyQt5.QtWidgets import QApplication
 
     from salome_agent.logs import setup_logging
