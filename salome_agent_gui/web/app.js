@@ -351,7 +351,11 @@ function setStatus(p) {
   $("conn-label").textContent = connected ? `Connected — ${p.label}` : (p.detail || p.label);
 }
 
-function setTheme(p) { document.documentElement.dataset.theme = p.theme === "dark" ? "dark" : "light"; }
+function setTheme(p) {
+  const dark = p.theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  $("btn-theme").dataset.tip = dark ? "Light theme" : "Dark theme";
+}
 
 // ---- settings -----------------------------------------------------------
 function lockRunOptions(locked) {
@@ -431,6 +435,10 @@ function wire() {
   $("btn-redo").addEventListener("click", () => bridge.command("redo"));
   $("btn-rebuild").addEventListener("click", () => bridge.command("rebuild"));
   $("btn-new").addEventListener("click", () => bridge.command("new"));
+  $("btn-theme").addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme === "dark";
+    bridge.saveSettings(JSON.stringify({ theme: dark ? "light" : "dark" }));
+  });
   $("btn-help").addEventListener("click", () => { $("help").hidden = !$("help").hidden; });
   $("btn-settings").addEventListener("click", openSettings);
   for (const id of ["btn-close-settings", "btn-cancel", "scrim"]) $(id).addEventListener("click", cancelSettings);
