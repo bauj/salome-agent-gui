@@ -506,3 +506,17 @@ def test_approving_the_plan_shows_the_first_stage_running_at_once(qtbot, bridges
     right_after = vm(p)                      # rendered by gate() itself, before any worker event
     assert right_after["gate"] is None and right_after["stages"][0]["status"] == "running"
     qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+
+
+def test_a_cancelled_turn_keeps_its_usage_out_of_the_next_turn(qtbot, bridges, cfg_path):
+    rec = {}
+    b, p = make(bridges, cfg_path, rec)
+    b.probe()
+    b.send("make a box")
+    b.gate(wait_gate(qtbot, p)["id"], "abort", "")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    assert vm(p)["usage"] == {"calls": 3, "prompt_tokens": 1000, "completion_tokens": 100,
+                              "llm_seconds": 1.5}
+    say(qtbot, b, "again")
+    assert vm(p)["usage"] == {"calls": 3, "prompt_tokens": 1000, "completion_tokens": 100,
+                              "llm_seconds": 1.5}
