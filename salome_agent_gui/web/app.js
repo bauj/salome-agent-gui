@@ -17,7 +17,8 @@ const ICON = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
 };
 const STEP = { ok: ["st ok", "ok"], running: ["st run", "run"], failed: ["st fail", "fail"],
-               skipped: ["st skip", "skip"], pending: ["st pend", null] };
+               skipped: ["st skip", "skip"], pending: ["st pend", null],
+               stopped: ["st stopped", "stop"] };
 const LEAD = { needs_input: "Question", failed: "Turn failed", fatal: "Run failed",
                degraded: "Study out of sync", ended: "Session ended", aborted: "Run aborted" };
 const TONE = { ok: "ok", needs_input: "info", degraded: "warn", ended: "warn", aborted: "muted" };
@@ -114,6 +115,7 @@ function stepRow(s, vm) {
   } else {
     const bits = [];
     if (s.elapsed_s !== null && s.elapsed_s !== undefined) bits.push(fmtDuration(s.elapsed_s));
+    if (s.status === "stopped") bits.push("stopped");
     if (s.status === "failed" && s.attempts > 0) bits.push(plural(s.attempts, "attempt"));
     else if (s.attempts > 1) bits.push(`${ordinal(s.attempts)} attempt`);
     meta.textContent = bits.join(" · ");

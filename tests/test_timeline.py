@@ -215,3 +215,20 @@ def test_each_stage_lists_the_objects_it_made():
     v.apply(ev("stage_done", index=0, names=["sa_0123456789ab_box_1", "sa_0123456789ab_box_2"]))
     stages = v.to_view_model(0)["stages"]
     assert stages[0]["objects"] == ["box_1", "box_2"] and stages[1]["objects"] == []
+
+
+def test_a_stage_still_running_when_the_turn_ends_shows_stopped():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    v.mark_resumed()
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))   # arrives on Stop
+    v.apply(ev("aborted"))
+    v.apply(ev("turn_done", turn=0, status="failed", message="turn cancelled"))
+    assert [s["status"] for s in v.to_view_model(0)["stages"]] == ["stopped", "pending"]
+
+
+def test_a_running_stage_mid_turn_is_not_stopped():
+    v = RunView()
+    v.apply(ev("plan", stages=PLAN))
+    v.apply(ev("stage_start", index=0, module="geom", intent="two boxes"))
+    assert v.to_view_model(0)["stages"][0]["status"] == "running"

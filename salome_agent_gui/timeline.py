@@ -151,6 +151,8 @@ class RunView:
         status, started_at = s.status, s.started_at
         if s.index == self._moved_on_to():
             status, started_at = "running", self._next_start
+        elif status == "running" and self.status() != "running":
+            status = "stopped"                  # the turn ended under it (Stop, fatal)
         return {"index": s.index, "module": s.module, "icon": icon_for(s.module),
                 "intent": s.intent, "status": status, "attempts": s.attempts,
                 "started_at": started_at, "elapsed_s": s.elapsed_s, "error": s.error,
