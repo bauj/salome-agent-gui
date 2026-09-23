@@ -129,7 +129,7 @@ function stepRow(s, vm) {
 function planFoot(gate) {
   const f = el("div", "card-foot");
   f.appendChild(btn("Approve & build", "primary", "approve", () => answer(gate, "approve", "", f), "approve"));
-  f.appendChild(btn("Edit plan", null, "edit", () => bridge.gate(gate.id, "edit", "")));
+  f.appendChild(btn("Edit plan", null, "edit", () => answer(gate, "edit", "", f)));
   f.appendChild(el("span", "spacer"));
   f.appendChild(btn("Abort", "ghost danger", "abort", () => answer(gate, "abort", "", f)));
   return f;

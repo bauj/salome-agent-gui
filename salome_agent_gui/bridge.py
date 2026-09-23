@@ -45,6 +45,7 @@ class Bridge(QObject):
         self.server_error = False
         self.close_pending = False
         self.page_ready = False
+        self._editing = False
         self._status = {"state": "offline", "label": "Not connected", "detail": NO_SERVER}
         self._items: list[tuple[str, object]] = []   # ("user"|"note", text) or ("turn", id)
         self._turns: dict[int, RunView] = {}
@@ -243,8 +244,18 @@ class Bridge(QObject):
         if self.worker is None or view is None or view.gate is None or view.gate_id != gate_id:
             return
         if action == "edit":
-            plan = self._edit_plan(self._dialog_parent, view.gate.get("plan") or [])
+            if self._editing:
+                return
+            self._editing = True
+            try:
+                plan = self._edit_plan(self._dialog_parent, view.gate.get("plan") or [])
+            finally:
+                self._editing = False
+            # the dialog ran a nested event loop: the gate may be gone by now
+            if self.worker is None or view.gate is None or view.gate_id != gate_id:
+                return
             if plan is None:
+                self._render()
                 return
             decision = {"action": "edit", "plan": plan}
         elif action == "hint":

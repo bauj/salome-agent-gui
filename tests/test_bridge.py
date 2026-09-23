@@ -418,3 +418,56 @@ def test_system_theme_follows_the_palette_and_an_explicit_theme_wins(tmp_path, b
     assert p.last("setTheme") == {"theme": "dark"}
     b.saveSettings(json.dumps({"theme": "light"}))
     assert p.last("setTheme") == {"theme": "light"}
+
+
+def test_double_edit_while_the_dialog_is_open_sends_one_answer(qtbot, bridges, cfg_path):
+    rec = {}
+    plan = [{"module": "geom", "intent": "cyl", "params": {}, "inputs": []}]
+    holder = {}
+
+    def editor(parent, current):
+        if "reentered" not in holder:
+            holder["reentered"] = True
+            holder["b"].gate(holder["id"], "edit", "")     # second click, inside the dialog loop
+        return plan
+
+    b, p = make(bridges, cfg_path, rec, edit_plan=editor)
+    holder["b"] = b
+    b.probe()
+    b.send("x")
+    holder["id"] = wait_gate(qtbot, p)["id"]
+    answers = []
+    orig = b.worker.answer_gate
+    b.worker.answer_gate = lambda d: (answers.append(d), orig(d))
+    b.gate(holder["id"], "edit", "")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    assert len(answers) == 1
+
+
+def test_worker_gone_while_the_edit_dialog_is_open_does_not_crash(qtbot, bridges, cfg_path):
+    rec = {}
+    holder = {}
+
+    def editor(parent, current):
+        holder["b"].worker = None                           # SALOME exited under the dialog
+        return [{"module": "geom", "intent": "cyl", "params": {}, "inputs": []}]
+
+    b, p = make(bridges, cfg_path, rec, edit_plan=editor)
+    holder["b"] = b
+    b.probe()
+    b.send("x")
+    gate = wait_gate(qtbot, p)
+    worker = b.worker
+    b.gate(gate["id"], "edit", "")
+    worker.close()
+    worker.wait(3000)
+
+
+def test_cancelled_edit_re_renders_the_turn(qtbot, bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {}, edit_plan=lambda parent, plan: None)
+    b.probe()
+    b.send("x")
+    gate = wait_gate(qtbot, p)
+    n = len(p.all("renderTurn"))
+    b.gate(gate["id"], "edit", "")
+    assert len(p.all("renderTurn")) == n + 1 and vm(p)["gate"] == gate
