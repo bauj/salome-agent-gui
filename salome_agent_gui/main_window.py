@@ -9,12 +9,14 @@ from PyQt5.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBox
 
 from salome_agent_gui import config_store, dialogs
 from salome_agent_gui.chat_view import ChatView
-from salome_agent_gui.run_worker import RunWorker, default_run
+from salome_agent_gui.conversation_worker import ConversationWorker, default_open
 
-HELP = ("Each message is one salome-agent run: the planner proposes stages, you approve, "
-        "edit or abort; each stage is generated and verified in this SALOME session. "
-        "On a failed stage give a hint, skip it or abort. Results land in the study; "
-        "result.py and report.md are linked at the end.")
+HELP = ("The first message starts a conversation: the planner proposes stages, you approve, "
+        "edit or abort, and each stage is built in this SALOME session. Follow-up messages "
+        "change that model (\"make the roof taller\", \"add a chimney\"). Undo and Redo step "
+        "through turns; Rebuild recreates the study from the model when they got out of sync; "
+        "New conversation starts over. While a conversation is open it keeps the agent "
+        "server to itself. result.py and report.md are linked after each turn.")
 NO_SERVER = "No agent server. Start it from Tools > Plugins > SALOME Agent."
 
 
@@ -40,17 +42,19 @@ class HistoryLineEdit(QLineEdit):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config_path: Path, *, run_fn=None, probe_fn=None,
+    def __init__(self, config_path: Path, *, open_fn=None, probe_fn=None,
                  ask_hint=None, edit_plan=None, parent_pid: int | None = None):
         super().__init__()
         from agent_server import handshake
 
         self.config_path = Path(config_path)
-        self._run_fn = run_fn or default_run
+        self._open_fn = open_fn or default_open
         self._probe_fn = probe_fn or handshake.live_owner
         self._ask_hint = ask_hint or dialogs.ask_hint
         self._edit_plan = edit_plan or dialogs.edit_plan
-        self.worker: RunWorker | None = None
+        self.worker: ConversationWorker | None = None
+        self._busy = False
+        self._degraded = False
         self._view = None
         self._connected = False
         self._close_pending = False
@@ -130,17 +134,24 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(1, 1)
 
         self.input = HistoryLineEdit()
-        self.input.setPlaceholderText("Describe what to build…")
+        self.input.setPlaceholderText("Describe what to build, then ask for changes…")
         self.input.returnPressed.connect(self.send)
         self.send_btn, self.stop_btn = QPushButton("Send"), QPushButton("Stop")
         self.send_btn.clicked.connect(self.send)
         self.stop_btn.clicked.connect(self._stop)
+        self.undo_btn, self.redo_btn = QPushButton("Undo"), QPushButton("Redo")
+        self.rebuild_btn, self.new_btn = QPushButton("Rebuild"), QPushButton("New conversation")
+        self.undo_btn.clicked.connect(lambda: self._command("undo"))
+        self.redo_btn.clicked.connect(lambda: self._command("redo"))
+        self.rebuild_btn.clicked.connect(lambda: self._command("rebuild"))
+        self.new_btn.clicked.connect(self._new_conversation)
         help_btn, quit_btn = QPushButton("Help"), QPushButton("Quit")
         help_btn.clicked.connect(lambda: QMessageBox.information(self, "SALOME Agent", HELP))
         quit_btn.clicked.connect(self.close)
         row = QHBoxLayout()
         row.addWidget(self.input, 1)
-        for b in (self.send_btn, self.stop_btn, help_btn, quit_btn):
+        for b in (self.send_btn, self.stop_btn, self.undo_btn, self.redo_btn,
+                  self.rebuild_btn, self.new_btn, help_btn, quit_btn):
             row.addWidget(b)
 
         central = QWidget()
@@ -201,41 +212,74 @@ class MainWindow(QMainWindow):
         self._parent_watch.stop()
         self.status.setText("SALOME has exited — closing")
         if self.worker is not None:
-            self.worker.stop()
+            self.worker.close()
         self.close()
 
-    # ---- runs -----------------------------------------------------------
+    # ---- conversation ---------------------------------------------------
     def _sync_buttons(self):
-        running = self.worker is not None
-        self.send_btn.setEnabled(self._connected and not running)
-        self.stop_btn.setEnabled(running)
+        open_, busy = self.worker is not None, self._busy
+        self.send_btn.setEnabled(self._connected and not busy)
+        self.stop_btn.setEnabled(busy)
+        for b in (self.undo_btn, self.redo_btn, self.new_btn):
+            b.setEnabled(open_ and not busy)
+        self.rebuild_btn.setEnabled(open_ and not busy and self._degraded)
+        for w in (self.batch, self.on_failure, self.tools, self.verbose):
+            w.setEnabled(not open_)
 
-    def send(self):
-        text = self.input.text().strip()
-        if not text or self.worker is not None or not self._connected:
-            return
+    def _start_conversation(self) -> bool:
         self._save_key_fields()
         try:
             config = config_store.load(self.config_path)
         except Exception as e:  # noqa: BLE001
             self.status.setText(f"Config error: {e}")
-            return
+            return False
         config.setdefault("policy", {})
         config["policy"]["on_stage_failure"] = self.on_failure.currentText()
         config["policy"]["tool_selection"] = self.tools.currentText()
+        worker = ConversationWorker(config, batch=self.batch.isChecked(),
+                                    verbose=self.verbose.value(), open_fn=self._open_fn,
+                                    parent=self)
+        worker.event.connect(self._on_event)
+        worker.gate.connect(self._on_gate)
+        worker.turn_done.connect(self._on_turn_done)
+        worker.finished.connect(lambda w=worker: self._on_worker_finished(w))
+        self.worker = worker
+        self._degraded = False
+        worker.start()
+        return True
+
+    def send(self):
+        text = self.input.text().strip()
+        if not text or self._busy or not self._connected:
+            return
+        if self.worker is None and not self._start_conversation():
+            return
         self.input.remember(text)
         self.input.clear()
         self.chat.add_user(text)
         self._view = self.chat.add_run()
-        self.worker = RunWorker(text, config, batch=self.batch.isChecked(),
-                                verbose=self.verbose.value(), run_fn=self._run_fn, parent=self)
-        self.worker.event.connect(self._on_event)
-        self.worker.gate.connect(self._on_gate)
-        self.worker.done.connect(self._on_done)
-        self.worker.start()
+        self._busy = True
+        self.worker.submit(text)
+        self._sync_buttons()
+
+    def _command(self, name: str):
+        if self.worker is None or self._busy:
+            return
+        self._busy = True
+        getattr(self.worker, name)()
+        self._sync_buttons()
+
+    def _new_conversation(self):
+        if self.worker is None or self._busy:
+            return
+        self._busy = True
+        self.worker.close()
+        self.chat.add_note("New conversation: the next message starts a fresh model.")
         self._sync_buttons()
 
     def _on_event(self, ev: dict):
+        if self._view is None:
+            return
         self._view.apply(ev)
         self.chat.refresh()
         if ev.get("kind") == "fatal":
@@ -273,31 +317,48 @@ class MainWindow(QMainWindow):
         self.worker.answer_gate(decision)
 
     def _stop(self):
-        if self.worker is not None:
-            self.status.setText("Stopping the current run…")
+        if self.worker is not None and self._busy:
+            self.status.setText("Stopping the current turn…")
             self.worker.stop()
 
-    def _on_done(self, _result):
-        if self._view is not None:
+    def _on_turn_done(self, payload: dict):
+        self._busy = False
+        self._degraded = bool(payload.get("degraded"))
+        command = payload.get("command")
+        if command != "turn":
+            self.chat.add_note(f"{command}: {payload.get('message', '')}")
+        elif self._view is not None:
+            if self._view.turn_status is None:
+                self._view.turn_status = payload.get("status")
+                self._view.turn_message = payload.get("message")
             self._view.gate = None
             self._view.finished = True
-            self.chat.refresh()
-        self.worker.wait(2000)
+        if payload.get("ended"):
+            self._busy = True
+            self.chat.add_note("The conversation has ended; the next message starts a new "
+                               "conversation.")
+        self.chat.refresh()
+        self._sync_buttons()
+        if not self._close_pending and not self._server_error:
+            self.probe()
+
+    def _on_worker_finished(self, worker):
+        if worker is not self.worker:
+            return
+        worker.wait(2000)
         self.worker = None
+        self._busy = False
+        self._degraded = False
         self._sync_buttons()
         if self._close_pending:
             self.close()
-            return
-        if self._server_error:
-            return
-        self.probe()
 
     def closeEvent(self, e):
         if self.worker is not None:
-            self.worker.stop()
+            self.worker.close()
             if not self.worker.wait(3000):
                 self._close_pending = True
-                self.status.setText("Stopping the current run…")
+                self.status.setText("Stopping the current turn…")
                 e.ignore()
                 return
         super().closeEvent(e)
