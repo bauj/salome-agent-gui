@@ -329,3 +329,28 @@ def test_an_open_reasoning_block_stays_open_across_a_re_render(qtbot, page):
     fake.emit("renderTurn", dict(PLAN_VM, stages=stages, status="ok"))
     qtbot.wait(200)
     assert run_js(qtbot, view, "document.querySelector('details.reasoning').open") is True
+
+
+def test_unlocked_save_sends_the_policy_knobs(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, verify_cadence="final", plan_detail="balanced",
+                                  exec_retries=2, tool_iteration_cap=12))
+    wait_js(qtbot, view, "document.getElementById('set-cap').value === '12'")
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-cadence').value = 'strict';"
+                        "document.getElementById('set-detail').value = 'coarse';"
+                        "document.getElementById('set-exec-retries').value = '4';"
+                        "document.getElementById('set-cap').value = '20';"
+                        "document.getElementById('btn-save').click(); true")
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    saved = [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
+    assert (saved["verify_cadence"], saved["plan_detail"], saved["exec_retries"],
+            saved["tool_iteration_cap"]) == ("strict", "coarse", 4, 20)
+
+
+def test_policy_knobs_lock_with_the_other_run_options(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, locked=True))
+    wait_js(qtbot, view, "document.getElementById('set-on-failure').disabled")
+    assert run_js(qtbot, view, "['set-cadence','set-detail','set-exec-retries','set-cap']"
+                               ".every((id) => document.getElementById(id).disabled)") is True

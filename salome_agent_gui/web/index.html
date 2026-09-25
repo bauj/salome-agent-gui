@@ -83,6 +83,14 @@
         <div class="field"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
         <div class="field"><label for="set-tools">Tools offered</label><select id="set-tools"><option value="hints">Planner hints</option><option value="all">All tools</option></select></div>
       </div>
+      <div class="row2">
+        <div class="field"><label for="set-detail">Plan detail</label><select id="set-detail"><option value="coarse">Fewer stages</option><option value="balanced">Balanced</option><option value="fine">More stages</option></select></div>
+        <div class="field"><label for="set-cadence">Self-check</label><select id="set-cadence"><option value="none">Off</option><option value="final">Before finishing a stage</option><option value="strict">Strict</option></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="set-exec-retries">Retries after a failed run</label><input id="set-exec-retries" type="number" min="0" max="10" step="1"></div>
+        <div class="field"><label for="set-cap">Tool calls per stage</label><input id="set-cap" type="number" min="1" max="60" step="1"></div>
+      </div>
       <div class="field"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
       <div class="toggle-row"><div><div class="t-label">Show model reasoning</div><div class="t-help">Debug: what the model thinks while it works, under each stage</div></div><span class="switch" id="set-reasoning"></span></div>
     </div>
