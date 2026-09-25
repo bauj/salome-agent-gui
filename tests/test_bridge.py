@@ -520,3 +520,17 @@ def test_a_cancelled_turn_keeps_its_usage_out_of_the_next_turn(qtbot, bridges, c
     say(qtbot, b, "again")
     assert vm(p)["usage"] == {"calls": 3, "prompt_tokens": 1000, "completion_tokens": 100,
                               "llm_seconds": 1.5}
+
+
+def test_reasoning_event_appends_without_re_rendering_the_turn(qtbot, bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    first_turn(qtbot, b, p)
+    renders = len(p.all("renderTurn"))
+    b._on_event({"kind": "reasoning", "run_id": "r", "data": {
+        "source": "stage", "index": 0, "call": 2, "channel": "reasoning", "text": "hmm"}})
+    assert len(p.all("renderTurn")) == renders
+    turn = vm(p)["id"]
+    assert p.last("appendReasoning") == {"turn": turn, "key": "stage:0", "call": 2,
+                                         "channel": "reasoning", "text": "hmm"}
+    b._render()
+    assert vm(p)["stages"][0]["reasoning"] == [{"call": 2, "reasoning": "hmm", "prose": ""}]

@@ -200,7 +200,7 @@ def test_settings_lock_run_options_and_save(qtbot, page):
     qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
     saved = [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
     assert saved == {"base_url": "http://llm.example/v1", "model": "qwen", "api_key": "sk-test",
-                     "theme": "dark"}
+                     "theme": "dark", "show_reasoning": False}
 
 
 def test_theme_push_sets_the_theme(qtbot, page):
@@ -281,3 +281,51 @@ def test_objects_of_a_turn_without_steps_are_still_listed(qtbot, page):
     fake.emit("renderTurn", dict(EDIT_VM, objects=["torus_1"]))
     wait_js(qtbot, view, "!!document.querySelector('.result')")
     assert run_js(qtbot, view, "!!document.querySelector('.result details.objects')") is True
+
+
+def _reasoning(turn, key, call, channel, text):
+    return {"turn": turn, "key": key, "call": call, "channel": channel, "text": text}
+
+
+def test_streamed_reasoning_lands_under_its_stage_and_the_turn(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, show_reasoning=True))
+    fake.emit("renderTurn", PLAN_VM)
+    wait_js(qtbot, view, "document.querySelectorAll('.step').length === 2")
+    turn = PLAN_VM["id"]
+    fake.emit("appendReasoning", _reasoning(turn, "planner", 1, "reasoning", "plan "))
+    fake.emit("appendReasoning", _reasoning(turn, "planner", 1, "reasoning", EVIL))
+    fake.emit("appendReasoning", _reasoning(turn, "stage:1", 2, "prose", "Meshing."))
+    wait_js(qtbot, view, "!!document.querySelector('.step[data-stage=\"1\"] details.reasoning')")
+    assert run_js(qtbot, view,
+                  "document.querySelector('.turn-reasoning .r-think').textContent") == "plan " + EVIL
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+    assert run_js(qtbot, view, "document.querySelector('.step[data-stage=\"1\"] .r-prose')"
+                               ".textContent") == "Meshing."
+    assert run_js(qtbot, view, "document.querySelector('.turn-reasoning summary').textContent") \
+        == "Reasoning · 1 call"
+    assert run_js(qtbot, view, "getComputedStyle(document.querySelector('details.reasoning'))"
+                               ".display") == "block"
+
+
+def test_reasoning_is_hidden_unless_the_setting_is_on(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", dict(PLAN_VM, reasoning={"planner": [
+        {"call": 1, "reasoning": "hmm", "prose": ""}]}))
+    wait_js(qtbot, view, "!!document.querySelector('details.reasoning')")
+    assert run_js(qtbot, view, "getComputedStyle(document.querySelector('details.reasoning'))"
+                               ".display") == "none"
+
+
+def test_an_open_reasoning_block_stays_open_across_a_re_render(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, show_reasoning=True))
+    stages = [dict(PLAN_VM["stages"][0], reasoning=[{"call": 1, "reasoning": "a", "prose": ""}]),
+              PLAN_VM["stages"][1]]
+    fake.emit("renderTurn", dict(PLAN_VM, stages=stages))
+    wait_js(qtbot, view, "!!document.querySelector('details.reasoning')")
+    run_js(qtbot, view, "document.querySelector('details.reasoning summary').click(); true")
+    wait_js(qtbot, view, "document.querySelector('details.reasoning').open")
+    fake.emit("renderTurn", dict(PLAN_VM, stages=stages, status="ok"))
+    qtbot.wait(200)
+    assert run_js(qtbot, view, "document.querySelector('details.reasoning').open") is True

@@ -95,15 +95,18 @@ list of calls `{"call": n, "reasoning": str, "prose": str}`. A retried stage
 (verify failure, `run_stage` again) keeps adding calls to the same stage block.
 `apply({"kind": "reasoning"})` appends the chunk to the right call, creating the
 block or call when new. `to_view_model` exposes them: the planner block on the
-turn, each stage's block on its stage view, the edit block on the edits view.
+turn (`vm.reasoning`, keys `planner` / `edit`), each stage's block on its stage
+view (`stage.reasoning`).
 
 ### Rendering
 
 A collapsed `<details class="reasoning" data-key="<turn>:<key>">`:
 
-- planner block at the top of the stages card;
+- planner block at the top of the turn, above the cards (planning reasoning
+  streams before the stages card exists);
 - stage block inside its step row, under the stage line;
-- edit block in the edits card.
+- edit block at the top of the turn too (the edits card appears only with the
+  first edit).
 
 Summary: "Reasoning · N calls". Body: calls
 separated by a thin rule; reasoning in muted pre-wrap text, prose in normal
