@@ -336,7 +336,7 @@ body.settings-open .drawer { transform: none; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
 }
 .field input:focus, .field select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-.field select:disabled { opacity: .5; }
+.field select:disabled, .field input:disabled { opacity: .5; }
 .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
 .toggle-row .t-label { font-size: 13.5px; }

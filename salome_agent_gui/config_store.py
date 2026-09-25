@@ -63,6 +63,10 @@ def save_raw(path: Path, text: str) -> None:
 THEMES = ("system", "light", "dark")
 ON_FAILURE = ("abort", "continue")
 TOOL_SELECTION = ("hints", "all")
+VERIFY_CADENCE = ("none", "final", "strict")
+PLAN_DETAIL = ("coarse", "balanced", "fine")
+# policy int knobs: (default, min, max)
+POLICY_INTS = {"exec_retries": (2, 0, 10), "tool_iteration_cap": (12, 1, 60)}
 
 
 def _section(data, name: str) -> dict:
@@ -75,6 +79,21 @@ def _verbose(value) -> int:
         return max(0, min(2, int(value or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def _int(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _policy_int(policy: dict, key: str) -> int:
+    default, lo, hi = POLICY_INTS[key]
+    value = _int(policy.get(key))
+    return default if value is None else max(lo, min(hi, value))
 
 
 def read_settings(path: Path) -> dict:
@@ -93,6 +112,9 @@ def read_settings(path: Path) -> dict:
         "verbose": _verbose(gui.get("verbose")),
         "theme": gui.get("theme") if gui.get("theme") in THEMES else "system",
         "show_reasoning": bool(gui.get("show_reasoning", False)),
+        "verify_cadence": policy.get("verify_cadence") if policy.get("verify_cadence") in VERIFY_CADENCE else "final",
+        "plan_detail": policy.get("plan_detail") if policy.get("plan_detail") in PLAN_DETAIL else "balanced",
+        **{k: _policy_int(policy, k) for k in POLICY_INTS},
     }
 
 
@@ -112,6 +134,14 @@ def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None
             policy["on_stage_failure"] = fields["on_stage_failure"]
         if fields.get("tool_selection") in TOOL_SELECTION:
             policy["tool_selection"] = fields["tool_selection"]
+        if fields.get("verify_cadence") in VERIFY_CADENCE:
+            policy["verify_cadence"] = fields["verify_cadence"]
+        if fields.get("plan_detail") in PLAN_DETAIL:
+            policy["plan_detail"] = fields["plan_detail"]
+        for key, (_, lo, hi) in POLICY_INTS.items():
+            value = _int(fields.get(key))
+            if value is not None:
+                policy[key] = max(lo, min(hi, value))
         if "batch" in fields:
             gui["batch"] = bool(fields["batch"])
         if "verbose" in fields:

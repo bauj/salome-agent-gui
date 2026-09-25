@@ -458,7 +458,8 @@ function setTheme(p) {
 // ---- settings -----------------------------------------------------------
 function lockRunOptions(locked) {
   state.locked = locked;
-  for (const id of ["set-on-failure", "set-tools", "set-verbose"]) $(id).disabled = locked;
+  for (const id of ["set-on-failure", "set-tools", "set-verbose", "set-detail", "set-cadence",
+                    "set-exec-retries", "set-cap"]) $(id).disabled = locked;
   $("set-batch").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
   $("run-lock").hidden = !locked;
@@ -472,6 +473,10 @@ function setSettings(s) {
   $("set-on-failure").value = s.on_stage_failure;
   $("set-tools").value = s.tool_selection;
   $("set-verbose").value = String(s.verbose);
+  $("set-detail").value = s.plan_detail || "balanced";
+  $("set-cadence").value = s.verify_cadence || "final";
+  $("set-exec-retries").value = String(s.exec_retries ?? 2);
+  $("set-cap").value = String(s.tool_iteration_cap ?? 12);
   $("set-theme").value = s.theme;
   $("set-batch").classList.toggle("on", !!s.batch);
   $("batch-sw").classList.toggle("on", !!s.batch);
@@ -499,6 +504,10 @@ function saveSettings() {
       on_stage_failure: $("set-on-failure").value,
       tool_selection: $("set-tools").value,
       verbose: parseInt($("set-verbose").value, 10),
+      plan_detail: $("set-detail").value,
+      verify_cadence: $("set-cadence").value,
+      exec_retries: parseInt($("set-exec-retries").value, 10),
+      tool_iteration_cap: parseInt($("set-cap").value, 10),
     });
   }
   bridge.saveSettings(JSON.stringify(out));
