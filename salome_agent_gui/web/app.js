@@ -25,6 +25,9 @@ const TONE = { ok: "ok", needs_input: "info", degraded: "warn", ended: "warn", a
 
 let bridge = null;
 const state = { busy: false, open: false, canSend: false, stopping: false, locked: false, settings: null };
+// reasoning blocks by data-key: which are open, and where their body was scrolled
+const reasoningOpen = new Set();
+const reasoningScroll = new Map();
 const $ = (id) => document.getElementById(id);
 
 function el(tag, cls, text) {
@@ -89,8 +92,81 @@ function answer(gate, action, text, container) {
   bridge.gate(gate.id, action, text || "");
 }
 
+// ---- model reasoning (debug) --------------------------------------------
+function reasoningCall(c) {
+  const node = el("div", "r-call");
+  node.dataset.call = String(c.call);
+  node.appendChild(el("div", "r-think", c.reasoning || ""));
+  node.appendChild(el("div", "r-prose", c.prose || ""));
+  return node;
+}
+
+function reasoningSummary(details) {
+  const n = details.querySelectorAll(".r-call").length;
+  details.querySelector("summary").textContent = `Reasoning · ${plural(n, "call")}`;
+}
+
+function reasoningNode(turn, key, calls) {
+  const details = el("details", "reasoning");
+  const dkey = `${turn}:${key}`;
+  details.dataset.key = dkey;
+  details.appendChild(el("summary"));
+  const body = el("div", "r-body");
+  for (const c of calls) body.appendChild(reasoningCall(c));
+  details.appendChild(body);
+  reasoningSummary(details);
+  details.open = reasoningOpen.has(dkey);
+  details.addEventListener("toggle", () => {
+    if (details.open) reasoningOpen.add(dkey); else reasoningOpen.delete(dkey);
+  });
+  body.addEventListener("scroll", () => {
+    reasoningScroll.set(dkey, body.scrollHeight - body.scrollTop - body.clientHeight < 8
+      ? "end" : body.scrollTop);
+  });
+  return details;
+}
+
+function restoreReasoningScroll(root) {
+  root.querySelectorAll("details.reasoning[open]").forEach((d) => {
+    const body = d.querySelector(".r-body");
+    const at = reasoningScroll.get(d.dataset.key);
+    body.scrollTop = at === undefined || at === "end" ? body.scrollHeight : at;
+  });
+}
+
+function appendReasoning(p) {
+  const wrap = col().querySelector(`[data-turn="${p.turn}"]`);
+  if (!wrap) return;                      // the next renderTurn draws it from the view model
+  let host;
+  if (p.key.startsWith("stage:")) {
+    host = wrap.querySelector(`.step[data-stage="${p.key.slice(6)}"] .main`);
+  } else {
+    host = wrap.querySelector(".turn-reasoning");
+  }
+  if (!host) return;
+  let details = host.querySelector(`:scope > details.reasoning[data-key="${p.turn}:${p.key}"]`);
+  if (!details) {
+    details = reasoningNode(p.turn, p.key, []);
+    host.appendChild(details);
+  }
+  const body = details.querySelector(".r-body");
+  let call = body.querySelector(`.r-call[data-call="${p.call}"]`);
+  if (!call) {
+    call = reasoningCall({ call: p.call });
+    body.appendChild(call);
+    reasoningSummary(details);
+  }
+  const pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+  const stick = nearBottom();
+  call.querySelector(p.channel === "prose" ? ".r-prose" : ".r-think")
+    .appendChild(document.createTextNode(String(p.text || "")));
+  if (pinned) body.scrollTop = body.scrollHeight;
+  if (stick) scrollEnd();
+}
+
 function stepRow(s, vm) {
   const li = el("li", "step" + (s.status === "pending" ? " pending" : ""));
+  li.dataset.stage = String(s.index);
   const [cls, icon] = STEP[s.status] || STEP.pending;
   const st = el("span", cls);
   if (icon) svg(st, icon);
@@ -129,6 +205,9 @@ function stepRow(s, vm) {
   }
   const gateShowsError = vm.gate && vm.gate.kind === "stage_failed";
   if (s.error && s.status === "failed" && !gateShowsError) main.appendChild(el("div", "err", s.error));
+  if (s.reasoning && s.reasoning.length) {
+    main.appendChild(reasoningNode(vm.id, `stage:${s.index}`, s.reasoning));
+  }
   li.appendChild(main);
   return li;
 }
@@ -297,6 +376,13 @@ function turnNode(vm) {
   wrap.appendChild(av);
   wrap.appendChild(body);
   const gate = vm.gate;
+  // planner and chat-edit reasoning: the turn level, drawn before any card exists
+  const turnReasoning = el("div", "turn-reasoning");
+  for (const key of ["planner", "edit"]) {
+    const calls = (vm.reasoning || {})[key];
+    if (calls && calls.length) turnReasoning.appendChild(reasoningNode(vm.id, key, calls));
+  }
+  body.appendChild(turnReasoning);
   if (gate && gate.kind === "plan") {
     const t = el("div", "agent-text", "Here's the plan. ");
     t.appendChild(el("span", "muted", "Approve it to start building, or edit the stages first."));
@@ -319,6 +405,7 @@ function renderTurn(vm) {
   if (!old) { append(node); return; }
   const stick = nearBottom();
   old.replaceWith(node);
+  restoreReasoningScroll(node);
   if (stick) scrollEnd();
 }
 
@@ -329,6 +416,7 @@ function replay(p) {
     else if (it.type === "note") col().appendChild(noteNode(it.text));
     else col().appendChild(turnNode(it.vm));
   }
+  restoreReasoningScroll(col());
   updateEmpty();
   scrollEnd();
 }
@@ -387,6 +475,8 @@ function setSettings(s) {
   $("set-theme").value = s.theme;
   $("set-batch").classList.toggle("on", !!s.batch);
   $("batch-sw").classList.toggle("on", !!s.batch);
+  $("set-reasoning").classList.toggle("on", !!s.show_reasoning);
+  document.body.classList.toggle("show-reasoning", !!s.show_reasoning);
   $("config-path").textContent = s.config_path || "";
   lockRunOptions(!!s.locked);
 }
@@ -401,6 +491,7 @@ function saveSettings() {
     model: $("set-model").value.trim(),
     api_key: $("set-api-key").value,
     theme: $("set-theme").value,
+    show_reasoning: $("set-reasoning").classList.contains("on"),
   };
   if (!state.locked) {
     Object.assign(out, {
@@ -455,6 +546,7 @@ function wire() {
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-reconnect").addEventListener("click", () => bridge.reconnect());
   $("btn-edit-json").addEventListener("click", () => bridge.editConfigJson());
+  $("set-reasoning").addEventListener("click", () => $("set-reasoning").classList.toggle("on"));
   $("set-batch").addEventListener("click", () => {
     if (!state.locked) $("set-batch").classList.toggle("on");
   });
@@ -485,6 +577,7 @@ const handlers = {
   addUser: (p) => append(userNode(p.text)),
   addNote: (p) => append(noteNode(p.text)),
   renderTurn,
+  appendReasoning,
   setBusy,
   setStatus,
   setSettings,

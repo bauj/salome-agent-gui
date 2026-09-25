@@ -41,6 +41,8 @@ class RunView:
     turn_message: str | None = None
     gate_id: int | None = None
     edit_ops: list[dict] = field(default_factory=list)
+    # "planner" / "stage:<i>" / "edit" -> [{"call", "reasoning", "prose"}]
+    reasoning: dict[str, list[dict]] = field(default_factory=dict)
     usage_base: dict | None = None
     clock: Callable[[], float] = field(default=time.time, repr=False)
     batch: bool = False
@@ -101,6 +103,12 @@ class RunView:
             if d.get("usage"):                  # totals so far, cancelled turns included
                 self.usage = dict(d["usage"])
             self.finished = True
+        elif kind == "reasoning":
+            calls = self.reasoning.setdefault(reasoning_key(d), [])
+            if not calls or calls[-1]["call"] != d.get("call"):
+                calls.append({"call": d.get("call"), "reasoning": "", "prose": ""})
+            channel = "prose" if d.get("channel") == "prose" else "reasoning"
+            calls[-1][channel] += str(d.get("text") or "")
         elif kind == "fatal":
             self.fatal = d.get("message")
         elif kind == "aborted":
@@ -158,7 +166,8 @@ class RunView:
         return {"index": s.index, "module": s.module, "icon": icon_for(s.module),
                 "intent": s.intent, "status": status, "attempts": s.attempts,
                 "started_at": started_at, "elapsed_s": s.elapsed_s, "error": s.error,
-                "objects": [short_name(n) for n in s.objects]}
+                "objects": [short_name(n) for n in s.objects],
+                "reasoning": _calls(self.reasoning.get(f"stage:{s.index}"))}
 
     def to_view_model(self, turn_id: int, icon_for=lambda module: None) -> dict:
         return {
@@ -171,7 +180,19 @@ class RunView:
             "objects": [short_name(n) for n in self.objects],
             "files": {"result_py": self.result_py, "report_md": self.report_md},
             "usage": self.turn_usage(),
+            "reasoning": {k: _calls(v) for k, v in self.reasoning.items()
+                          if not k.startswith("stage:")},
         }
+
+
+def reasoning_key(d: dict) -> str:
+    if d.get("source") == "stage":
+        return f"stage:{d.get('index')}"
+    return "edit" if d.get("source") == "edit" else "planner"
+
+
+def _calls(calls) -> list[dict]:
+    return [dict(c) for c in calls or []]
 
 
 def _edit_line(d: dict) -> str:

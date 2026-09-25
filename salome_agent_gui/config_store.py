@@ -92,6 +92,7 @@ def read_settings(path: Path) -> dict:
         "batch": bool(gui.get("batch", False)),
         "verbose": _verbose(gui.get("verbose")),
         "theme": gui.get("theme") if gui.get("theme") in THEMES else "system",
+        "show_reasoning": bool(gui.get("show_reasoning", False)),
     }
 
 
@@ -103,6 +104,8 @@ def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None
     gui = data.setdefault("gui", {})
     if fields.get("theme") in THEMES:
         gui["theme"] = fields["theme"]
+    if "show_reasoning" in fields:
+        gui["show_reasoning"] = bool(fields["show_reasoning"])
     if run_options:
         policy = data.setdefault("policy", {})
         if fields.get("on_stage_failure") in ON_FAILURE:

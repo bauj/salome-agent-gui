@@ -84,11 +84,13 @@ def test_view_model_shape_for_a_fresh_plan():
         "id": 3,
         "stages": [
             {"index": 0, "module": "geom", "icon": None, "intent": "two boxes", "status": "pending",
-             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": []},
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": [],
+             "reasoning": []},
             {"index": 1, "module": "smesh", "icon": None, "intent": "mesh", "status": "pending",
-             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": []}],
+             "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": [],
+             "reasoning": []}],
         "edits": [], "gate": None, "status": "running", "message": "", "objects": [],
-        "files": {"result_py": None, "report_md": None}, "usage": None}
+        "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {}}
 
 
 def test_view_model_icons_come_from_the_lookup():
@@ -242,3 +244,30 @@ def test_turn_done_usage_counts_for_a_turn_with_no_report():
                       "llm_seconds": 4.3}))
     assert v.to_view_model(1)["usage"] == {"calls": 2, "prompt_tokens": 800,
                                            "completion_tokens": 60, "llm_seconds": 2.8}
+
+
+def _r(source, call, channel, text, index=None):
+    return ev("reasoning", source=source, index=index, call=call, channel=channel, text=text)
+
+
+def test_reasoning_blocks_by_source_and_call():
+    v = RunView()
+    v.apply(_r("planner", 1, "reasoning", "plan "))
+    v.apply(_r("planner", 1, "reasoning", "it"))
+    v.apply(ev("plan", stages=PLAN))
+    v.apply(_r("stage", 2, "reasoning", "box?", index=0))
+    v.apply(_r("stage", 2, "prose", "Making a box.", index=0))
+    v.apply(_r("stage", 3, "prose", "Done.", index=0))
+    vm = v.to_view_model(1)
+    assert vm["reasoning"] == {"planner": [{"call": 1, "reasoning": "plan it", "prose": ""}]}
+    assert vm["stages"][0]["reasoning"] == [
+        {"call": 2, "reasoning": "box?", "prose": "Making a box."},
+        {"call": 3, "reasoning": "", "prose": "Done."}]
+    assert vm["stages"][1]["reasoning"] == []
+
+
+def test_edit_turn_reasoning_is_turn_level():
+    v = RunView()
+    v.apply(_r("edit", 1, "prose", "Widening the box."))
+    assert v.to_view_model(1)["reasoning"] == {
+        "edit": [{"call": 1, "reasoning": "", "prose": "Widening the box."}]}

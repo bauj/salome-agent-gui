@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from salome_agent_gui import config_store, module_icons
 from salome_agent_gui.conversation_worker import ConversationWorker, default_open
-from salome_agent_gui.timeline import RunView
+from salome_agent_gui.timeline import RunView, reasoning_key
 
 NO_SERVER = ("No agent server. Start it from Tools > Plugins > SALOME Agent in the SALOME "
              "window, then press Reconnect in the settings.")
@@ -225,6 +225,13 @@ class Bridge(QObject):
         if view is None:
             return
         view.apply(ev)
+        if ev.get("kind") == "reasoning":
+            # streamed many times a second: append in place, no full re-render
+            d = ev.get("data") or {}
+            self._emit("appendReasoning", {"turn": self._current, "key": reasoning_key(d),
+                                           "call": d.get("call"), "channel": d.get("channel"),
+                                           "text": d.get("text")})
+            return
         for path in (view.result_py, view.report_md):
             if path:
                 self._files.add(path)
