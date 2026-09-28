@@ -200,7 +200,7 @@ def test_settings_lock_run_options_and_save(qtbot, page):
     qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
     saved = [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
     assert saved == {"base_url": "http://llm.example/v1", "model": "qwen", "api_key": "sk-test",
-                     "theme": "dark", "show_reasoning": False}
+                     "ssl_cert_file": "~/certs/ca.pem", "theme": "dark", "show_reasoning": False}
 
 
 def test_theme_push_sets_the_theme(qtbot, page):

@@ -470,6 +470,7 @@ function setSettings(s) {
   $("set-base-url").value = s.base_url || "";
   $("set-model").value = s.model || "";
   $("set-api-key").value = s.api_key || "";
+  $("set-ssl-cert").value = s.ssl_cert_file || "";
   $("set-on-failure").value = s.on_stage_failure;
   $("set-tools").value = s.tool_selection;
   $("set-verbose").value = String(s.verbose);
@@ -495,6 +496,7 @@ function saveSettings() {
     base_url: $("set-base-url").value.trim(),
     model: $("set-model").value.trim(),
     api_key: $("set-api-key").value,
+    ssl_cert_file: $("set-ssl-cert").value.trim(),
     theme: $("set-theme").value,
     show_reasoning: $("set-reasoning").classList.contains("on"),
   };

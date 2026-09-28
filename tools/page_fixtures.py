@@ -82,7 +82,7 @@ USER_2 = "make the wheels bigger, and a bit wider apart"
 USER_3 = "add a spoiler on the back and mesh everything"
 
 SETTINGS = {"base_url": "http://llm.example/v1", "model": "auto", "api_key": "sk-test",
-            "on_stage_failure": "abort", "tool_selection": "hints", "batch": False,
+            "ssl_cert_file": "~/certs/ca.pem", "on_stage_failure": "abort", "tool_selection": "hints", "batch": False,
             "verbose": 0, "theme": "system", "locked": False,
             "config_path": "~/.config/salome/salome-agent.json"}
 STATUS_OK = {"state": "connected", "label": "GUI :46019 · auto", "detail": ""}

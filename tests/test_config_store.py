@@ -32,8 +32,10 @@ def test_ensure_user_config_without_seed_raises(tmp_path):
 
 def test_key_fields_round_trip_leaves_other_keys(tmp_path):
     user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
-    cs.save_key_fields(user, {"base_url": "http://h/v1", "model": "qwen", "api_key": "k"})
-    assert cs.read_key_fields(user) == {"base_url": "http://h/v1", "model": "qwen", "api_key": "k"}
+    cs.save_key_fields(user, {"base_url": "http://h/v1", "model": "qwen", "api_key": "k",
+                              "ssl_cert_file": "~/ca.pem"})
+    assert cs.read_key_fields(user) == {"base_url": "http://h/v1", "model": "qwen", "api_key": "k",
+                                        "ssl_cert_file": "~/ca.pem"}
     assert json.loads(user.read_text())["salome"] == SEED["salome"]
 
 
@@ -60,7 +62,7 @@ def test_seed_candidates_include_the_submodule_example():
 def test_read_settings_defaults_when_sections_are_missing(tmp_path):
     user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
     assert cs.read_settings(user) == {
-        "base_url": "", "model": "", "api_key": "", "on_stage_failure": "abort",
+        "base_url": "", "model": "", "api_key": "", "ssl_cert_file": "", "on_stage_failure": "abort",
         "tool_selection": "hints", "batch": False, "verbose": 0, "theme": "system",
         "show_reasoning": False, "verify_cadence": "final", "plan_detail": "balanced",
         "exec_retries": 2, "tool_iteration_cap": 12}
@@ -69,13 +71,13 @@ def test_read_settings_defaults_when_sections_are_missing(tmp_path):
 def test_save_settings_writes_llm_policy_and_gui(tmp_path):
     user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
     cs.save_settings(user, {"base_url": "http://h/v1", "model": "m", "api_key": "k",
-                            "on_stage_failure": "continue", "tool_selection": "all",
+                            "ssl_cert_file": "/etc/ca.pem", "on_stage_failure": "continue", "tool_selection": "all",
                             "batch": True, "verbose": 2, "theme": "dark",
                             "verify_cadence": "strict", "plan_detail": "fine",
                             "exec_retries": 0, "tool_iteration_cap": 30})
     assert cs.read_settings(user) == {
-        "base_url": "http://h/v1", "model": "m", "api_key": "k", "on_stage_failure": "continue",
-        "tool_selection": "all", "batch": True, "verbose": 2, "theme": "dark",
+        "base_url": "http://h/v1", "model": "m", "api_key": "k", "ssl_cert_file": "/etc/ca.pem",
+        "on_stage_failure": "continue", "tool_selection": "all", "batch": True, "verbose": 2, "theme": "dark",
         "show_reasoning": False, "verify_cadence": "strict", "plan_detail": "fine",
         "exec_retries": 0, "tool_iteration_cap": 30}
     data = json.loads(user.read_text())
