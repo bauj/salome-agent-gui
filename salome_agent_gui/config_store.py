@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 USER_CONFIG = Path.home() / ".config" / "salome" / "salome-agent.json"
-KEY_FIELDS = ("base_url", "model", "api_key")
+KEY_FIELDS = ("base_url", "model", "api_key", "ssl_cert_file")
 
 
 def seed_candidates() -> list[Path]:
