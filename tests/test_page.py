@@ -138,7 +138,7 @@ def test_enter_sends_and_shift_enter_does_not(qtbot, page):
     qtbot.wait(200)
     assert not [c for c in fake.calls if c[0] == "send"]
     run_js(qtbot, view, key % "false")
-    qtbot.waitUntil(lambda: ("send", "line one") in fake.calls, timeout=3000)
+    qtbot.waitUntil(lambda: ("send", "line one", []) in fake.calls, timeout=3000)
     assert run_js(qtbot, view, "document.getElementById('input').value") == ""
 
 
@@ -354,3 +354,77 @@ def test_policy_knobs_lock_with_the_other_run_options(qtbot, page):
     wait_js(qtbot, view, "document.getElementById('set-on-failure').disabled")
     assert run_js(qtbot, view, "['set-cadence','set-detail','set-exec-retries','set-cap']"
                                ".every((id) => document.getElementById(id).disabled)") is True
+
+
+PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+PNG_URI = "data:image/png;base64," + PNG_B64
+
+
+def drop_files(qtbot, view, files):
+    """Drop files on the page; `files` is a list of (name, mime, base64)."""
+    parts = ",".join(
+        f"new File([Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0))], '{name}', "
+        f"{{type: '{mime}'}})" for name, mime, b64 in files)
+    run_js(qtbot, view, f"""
+        const dt = new DataTransfer();
+        for (const f of [{parts}]) dt.items.add(f);
+        window.dispatchEvent(new DragEvent('drop', {{dataTransfer: dt, bubbles: true,
+                                                     cancelable: true}}));
+        true""")
+
+
+def test_dropped_images_show_in_the_composer_and_go_with_the_message(qtbot, page):
+    view, fake = page
+    drop_files(qtbot, view, [("a.png", "image/png", PNG_B64), ("b.png", "image/png", PNG_B64)])
+    wait_js(qtbot, view, "document.querySelectorAll('#attachments .thumb').length === 2")
+    assert run_js(qtbot, view, "document.getElementById('attachments').hidden") is False
+    assert run_js(qtbot, view, "document.querySelector('.thumb img').src") == PNG_URI
+    run_js(qtbot, view, "document.querySelector('.thumb .remove').click(); true")
+    assert run_js(qtbot, view, "document.querySelectorAll('#attachments .thumb').length") == 1
+    run_js(qtbot, view, "document.getElementById('input').value = 'like this'; "
+                        "document.getElementById('send').click(); true")
+    qtbot.waitUntil(lambda: ("send", "like this", [PNG_URI]) in fake.calls, timeout=3000)
+    assert run_js(qtbot, view, "document.getElementById('attachments').hidden") is True
+    assert run_js(qtbot, view, "document.querySelectorAll('#attachments .thumb').length") == 0
+
+
+def test_images_alone_can_be_sent(qtbot, page):
+    view, fake = page
+    run_js(qtbot, view, "document.getElementById('send').click(); true")
+    qtbot.wait(200)
+    assert not [c for c in fake.calls if c[0] == "send"]
+    drop_files(qtbot, view, [("a.png", "image/png", PNG_B64)])
+    wait_js(qtbot, view, "document.querySelectorAll('#attachments .thumb').length === 1")
+    run_js(qtbot, view, "document.getElementById('send').click(); true")
+    qtbot.waitUntil(lambda: ("send", "", [PNG_URI]) in fake.calls, timeout=3000)
+
+
+def test_a_file_that_is_not_an_image_is_refused(qtbot, page):
+    view, _ = page
+    drop_files(qtbot, view, [("notes.txt", "text/plain", "aGVsbG8=")])
+    wait_js(qtbot, view, "document.getElementById('hint').classList.contains('error')")
+    assert "notes.txt" in run_js(qtbot, view, "document.getElementById('hint').textContent")
+    assert run_js(qtbot, view, "document.getElementById('attachments').hidden") is True
+
+
+def test_sent_images_show_above_the_message_and_open_full_size(qtbot, page):
+    view, fake = page
+    fake.emit("addUser", {"text": "like this", "images": [PNG_URI, PNG_URI]})
+    wait_js(qtbot, view, "document.querySelectorAll('.msg-user .msg-images img').length === 2")
+    assert run_js(qtbot, view, "document.querySelector('.msg-user .bubble').textContent") == \
+        "like this"
+    run_js(qtbot, view, "document.querySelector('.msg-images img').click(); true")
+    assert run_js(qtbot, view, "document.getElementById('lightbox').hidden") is False
+    assert run_js(qtbot, view, "document.getElementById('lightbox-img').src") == PNG_URI
+    run_js(qtbot, view, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})); "
+                        "true")
+    assert run_js(qtbot, view, "document.getElementById('lightbox').hidden") is True
+
+
+def test_an_image_only_message_has_no_empty_bubble_and_replays(qtbot, page):
+    view, fake = page
+    fake.emit("replay", {"items": [{"type": "user", "text": "", "images": [PNG_URI]},
+                                   {"type": "user", "text": "taller"}]})
+    wait_js(qtbot, view, "document.querySelectorAll('.msg-user').length === 2")
+    assert run_js(qtbot, view, "document.querySelectorAll('.msg-user .bubble').length") == 1
+    assert run_js(qtbot, view, "document.querySelectorAll('.msg-images img').length") == 1

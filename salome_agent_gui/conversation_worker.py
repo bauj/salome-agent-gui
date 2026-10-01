@@ -46,9 +46,10 @@ class ConversationWorker(QThread):
         self._pending = False
 
     # ---- called from the GUI thread ------------------------------------
-    def submit(self, text: str) -> None:
+    def submit(self, text: str, images: list[str] | None = None) -> None:
+        """`images`: reference images for the turn, as data: URIs."""
         self.cancel.clear()
-        self._queue.put(("turn", text))
+        self._queue.put(("turn", (text, list(images or []))))
 
     def undo(self) -> None:
         self._queue.put(("undo", None))
@@ -98,8 +99,9 @@ class ConversationWorker(QThread):
                 command, arg = item
                 try:
                     if command == "turn":
-                        r = conv.turn(arg, on_event=self.event.emit, on_gate=self._on_gate,
-                                      cancel=self.cancel)
+                        text, images = arg
+                        r = conv.turn(text, images=images or None, on_event=self.event.emit,
+                                      on_gate=self._on_gate, cancel=self.cancel)
                     else:
                         r = getattr(conv, command)()
                     status, message = r.status, r.message

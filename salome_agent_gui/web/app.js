@@ -23,8 +23,17 @@ const LEAD = { needs_input: "Question", failed: "Turn failed", fatal: "Run faile
                degraded: "Study out of sync", ended: "Session ended", aborted: "Run aborted" };
 const TONE = { ok: "ok", needs_input: "info", degraded: "warn", ended: "warn", aborted: "muted" };
 
+// Kept in step with bridge.py: the formats the vision LLM accepts, and the limits.
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+const MAX_IMAGES = 6;
+const MAX_IMAGE_MB = 10;
+const HINT = "Enter to send · Shift+Enter for a new line";
+
 let bridge = null;
 const state = { busy: false, open: false, canSend: false, stopping: false, locked: false, settings: null };
+// images attached to the message being written: [{name, url}] with url a data: URI
+let attached = [];
+let hintTimer = null;
 // reasoning blocks by data-key: which are open, and where their body was scrolled
 const reasoningOpen = new Set();
 const reasoningScroll = new Map();
@@ -72,9 +81,23 @@ function append(node) {
   if (stick) scrollEnd();
 }
 
-function userNode(text) {
+function imageNode(url, name) {
+  const img = el("img");
+  img.src = url;                      // a data:image/... URI the bridge has checked
+  img.alt = name || "";
+  img.title = name || "";
+  img.addEventListener("click", () => openLightbox(url));
+  return img;
+}
+
+function userNode(text, images) {
   const d = el("div", "msg-user");
-  d.appendChild(el("div", "bubble", text));
+  if (images && images.length) {
+    const g = el("div", "msg-images");
+    for (const url of images) g.appendChild(imageNode(url));
+    d.appendChild(g);
+  }
+  if (text) d.appendChild(el("div", "bubble", text));
   return d;
 }
 function noteNode(text) { return el("div", "note", text); }
@@ -412,7 +435,7 @@ function renderTurn(vm) {
 function replay(p) {
   col().textContent = "";
   for (const it of p.items) {
-    if (it.type === "user") col().appendChild(userNode(it.text));
+    if (it.type === "user") col().appendChild(userNode(it.text, it.images));
     else if (it.type === "note") col().appendChild(noteNode(it.text));
     else col().appendChild(turnNode(it.vm));
   }
@@ -434,8 +457,7 @@ function setBusy(p) {
   send.innerHTML = p.busy ? ICON.stop : ICON.send;
   send.title = p.busy ? "Stop" : "Send";
   send.disabled = p.busy ? p.stopping : !p.can_send;
-  $("hint").textContent = p.stopping ? "Stopping…"
-    : (p.busy ? "Working… press Stop to cancel" : "Enter to send · Shift+Enter for a new line");
+  if (!hintTimer) showHint();
   lockRunOptions(p.open);
 }
 
@@ -523,15 +545,94 @@ function autosize() {
   t.style.height = Math.min(t.scrollHeight, 180) + "px";
 }
 
+function showHint() {
+  hintTimer = null;
+  const h = $("hint");
+  h.classList.remove("error");
+  h.textContent = state.stopping ? "Stopping…"
+    : (state.busy ? "Working… press Stop to cancel" : HINT);
+}
+
+function showError(text) {
+  const h = $("hint");
+  h.textContent = text;
+  h.classList.add("error");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(showHint, 5000);
+}
+
+// ---- attached images -----------------------------------------------------
+function renderAttachments() {
+  const box = $("attachments");
+  box.textContent = "";
+  attached.forEach((a, i) => {
+    const t = el("div", "thumb");
+    t.appendChild(imageNode(a.url, a.name));
+    const x = el("button", "remove");
+    x.title = "Remove " + a.name;
+    svg(x, "fail");
+    x.addEventListener("click", () => { attached.splice(i, 1); renderAttachments(); });
+    t.appendChild(x);
+    box.appendChild(t);
+  });
+  box.hidden = attached.length === 0;
+}
+
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+async function attachFiles(files) {
+  const errors = [];
+  for (const f of files) {
+    if (!IMAGE_TYPES.includes(f.type)) {
+      errors.push(`${f.name || "That file"} is not a PNG, JPEG, WEBP, GIF or BMP image`);
+    } else if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
+      errors.push(`${f.name} is larger than ${MAX_IMAGE_MB} MB`);
+    } else if (attached.length >= MAX_IMAGES) {
+      errors.push(`At most ${MAX_IMAGES} images per message`);
+      break;
+    } else {
+      try {
+        attached.push({ name: f.name || "pasted image", url: await readFile(f) });
+      } catch (e) {
+        errors.push(`Could not read ${f.name}`);
+      }
+    }
+  }
+  renderAttachments();
+  if (errors.length) showError(errors[0]);
+  $("input").focus();
+}
+
+function hasFiles(e) { return e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files"); }
+
+// ---- image viewer ---------------------------------------------------------
+function openLightbox(url) {
+  $("lightbox-img").src = url;
+  $("lightbox").hidden = false;
+}
+function closeLightbox() {
+  $("lightbox").hidden = true;
+  $("lightbox-img").removeAttribute("src");
+}
+
 function submit() {
   if (state.busy) {
     if (!state.stopping) bridge.stop();
     return;
   }
   const text = $("input").value.trim();
-  if (!text || !state.canSend) return;
-  bridge.send(text);
+  if ((!text && !attached.length) || !state.canSend) return;
+  bridge.send(text, JSON.stringify(attached.map((a) => a.url)));
   $("input").value = "";
+  attached = [];
+  renderAttachments();
   autosize();
 }
 
@@ -576,6 +677,44 @@ function wire() {
     }
   });
   $("send").addEventListener("click", submit);
+  $("btn-attach").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", () => {
+    const files = Array.from($("file").files);
+    $("file").value = "";
+    attachFiles(files);
+  });
+  input.addEventListener("paste", (e) => {
+    const files = Array.from(e.clipboardData ? e.clipboardData.files : []);
+    if (!files.length) return;
+    e.preventDefault();
+    attachFiles(files);
+  });
+  // Every drop is handled here: one the page left alone would navigate away.
+  let dragDepth = 0;
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth += 1;
+    document.body.classList.add("dragging");
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) document.body.classList.remove("dragging");
+  });
+  window.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = hasFiles(e) ? "copy" : "none";
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove("dragging");
+    if (hasFiles(e)) attachFiles(Array.from(e.dataTransfer.files));
+  });
+  $("lightbox").addEventListener("click", closeLightbox);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("lightbox").hidden) closeLightbox();
+  });
   document.querySelectorAll(".suggestion").forEach((s) => s.addEventListener("click", () => {
     input.value = s.dataset.text;
     autosize();
@@ -585,7 +724,7 @@ function wire() {
 }
 
 const handlers = {
-  addUser: (p) => append(userNode(p.text)),
+  addUser: (p) => append(userNode(p.text, p.images)),
   addNote: (p) => append(noteNode(p.text)),
   renderTurn,
   appendReasoning,
