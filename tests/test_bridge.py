@@ -567,10 +567,11 @@ def test_images_alone_are_sent_with_a_stock_request(qtbot, bridges, cfg_path):
 
 
 @pytest.mark.parametrize("images", [
-    "not json", json.dumps(PNG), json.dumps([PNG] * 7), json.dumps([1]),
+    "not json", json.dumps(PNG), json.dumps([PNG] * 11), json.dumps([1]),
     json.dumps(["data:image/svg+xml;base64,PHN2Zz4="]),
     json.dumps(["data:text/html;base64,PGI+"]),
     json.dumps(['data:image/png;base64,AA"onerror=x']),
+    json.dumps(["data:image/png;base64,aGVsbG8="]),
 ])
 def test_bad_images_are_refused_with_a_note(bridges, cfg_path, images):
     b, p = make(bridges, cfg_path, {})
@@ -580,14 +581,24 @@ def test_bad_images_are_refused_with_a_note(bridges, cfg_path, images):
     assert p.last("addNote")["text"].startswith("Message not sent:")
 
 
-def test_an_oversized_image_is_refused(bridges, cfg_path, monkeypatch):
-    from salome_agent_gui import bridge as bridge_mod
+def test_images_past_the_size_budget_are_refused(bridges, cfg_path, monkeypatch):
+    from salome_agent import cli
 
-    monkeypatch.setattr(bridge_mod, "MAX_IMAGE_BYTES", 6)
+    monkeypatch.setattr(cli, "MAX_IMAGE_BYTES", 10)
     b, p = make(bridges, cfg_path, {})
     b.probe()
-    b.send("x", json.dumps(["data:image/png;base64," + "A" * 12]))
-    assert "larger than" in p.last("addNote")["text"] and b.worker is None
+    b.send("x", json.dumps([PNG, PNG]))
+    assert "MB of images" in p.last("addNote")["text"] and b.worker is None
+
+
+def test_an_image_is_labelled_by_its_content(qtbot, bridges, cfg_path):
+    rec = {}
+    b, p = make(bridges, cfg_path, rec)
+    b.probe()
+    b.send("x", json.dumps(["data:image/png;base64,/9j/4A=="]))   # a JPEG saved as .png
+    assert p.last("addUser")["images"] == ["data:image/jpeg;base64,/9j/4A=="]
+    wait_gate(qtbot, p)
+    assert rec["images"] == [["data:image/jpeg;base64,/9j/4A=="]]
 
 
 def test_nothing_to_send_without_text_or_images(bridges, cfg_path):
