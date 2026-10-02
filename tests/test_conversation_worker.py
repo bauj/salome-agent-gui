@@ -16,8 +16,9 @@ class FakeConv:
         self.decision = None
         self.cancelled_at_start = None
 
-    def turn(self, text, *, on_event, on_gate, cancel):
+    def turn(self, text, *, images=None, on_event, on_gate, cancel):
         self.calls.append(("turn", text))
+        self.images = images
         self.cancelled_at_start = cancel.is_set()
         if self.raises:
             exc, self.raises = self.raises, None
@@ -71,6 +72,19 @@ def test_turns_run_in_order_on_one_conversation(qtbot):
     assert rec["batch"] is True and rec["verbose"] == 2 and rec["config"] == {"k": 1}
     assert done[1] == {"command": "turn", "status": "ok", "message": "did make it taller",
                        "degraded": False, "ended": False}
+    w.close()
+    qtbot.waitUntil(w.isFinished, timeout=3000)
+
+
+def test_images_reach_the_conversation_and_none_means_no_images(qtbot):
+    conv, rec = FakeConv(), {}
+    w, done = start(qtbot, conv, rec)
+    w.submit("like this", ["data:image/png;base64,AAAA"])
+    qtbot.waitUntil(lambda: len(done) == 1, timeout=3000)
+    assert conv.images == ["data:image/png;base64,AAAA"]
+    w.submit("taller")
+    qtbot.waitUntil(lambda: len(done) == 2, timeout=3000)
+    assert conv.images is None
     w.close()
     qtbot.waitUntil(w.isFinished, timeout=3000)
 
