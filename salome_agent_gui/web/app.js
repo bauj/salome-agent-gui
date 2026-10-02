@@ -23,15 +23,16 @@ const LEAD = { needs_input: "Question", failed: "Turn failed", fatal: "Run faile
                degraded: "Study out of sync", ended: "Session ended", aborted: "Run aborted" };
 const TONE = { ok: "ok", needs_input: "info", degraded: "warn", ended: "warn", aborted: "muted" };
 
-// Kept in step with bridge.py: the formats the vision LLM accepts, and the limits.
+// Kept in step with salome_agent.cli (MAX_IMAGES, MAX_IMAGE_BYTES), which the
+// bridge holds every message to: the formats the vision LLM accepts, and the limits.
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
-const MAX_IMAGES = 6;
-const MAX_IMAGE_MB = 10;
+const MAX_IMAGES = 10;
+const MAX_IMAGES_MB = 20;   // all images of a message together
 const HINT = "Enter to send · Shift+Enter for a new line";
 
 let bridge = null;
 const state = { busy: false, open: false, canSend: false, stopping: false, locked: false, settings: null };
-// images attached to the message being written: [{name, url}] with url a data: URI
+// images attached to the message being written: [{name, size, url}] with url a data: URI
 let attached = [];
 let hintTimer = null;
 // reasoning blocks by data-key: which are open, and where their body was scrolled
@@ -592,14 +593,14 @@ async function attachFiles(files) {
   for (const f of files) {
     if (!IMAGE_TYPES.includes(f.type)) {
       errors.push(`${f.name || "That file"} is not a PNG, JPEG, WEBP, GIF or BMP image`);
-    } else if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
-      errors.push(`${f.name} is larger than ${MAX_IMAGE_MB} MB`);
+    } else if (attached.reduce((n, a) => n + a.size, f.size) > MAX_IMAGES_MB * 1024 * 1024) {
+      errors.push(`${f.name} would take this message past ${MAX_IMAGES_MB} MB of images`);
     } else if (attached.length >= MAX_IMAGES) {
       errors.push(`At most ${MAX_IMAGES} images per message`);
       break;
     } else {
       try {
-        attached.push({ name: f.name || "pasted image", url: await readFile(f) });
+        attached.push({ name: f.name || "pasted image", size: f.size, url: await readFile(f) });
       } catch (e) {
         errors.push(`Could not read ${f.name}`);
       }

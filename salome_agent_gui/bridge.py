@@ -1,5 +1,4 @@
 import json
-import re
 import time
 from pathlib import Path
 
@@ -9,32 +8,17 @@ from salome_agent_gui import config_store, module_icons
 from salome_agent_gui.conversation_worker import ConversationWorker, default_open
 from salome_agent_gui.timeline import RunView, reasoning_key
 
-MAX_IMAGES = 6
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
-# the formats the vision LLM accepts (salome_agent.cli._IMAGE_MIME_TYPES)
-_IMAGE_URI = re.compile(r"data:image/(png|jpeg|webp|gif|bmp);base64,[A-Za-z0-9+/]+={0,2}")
 IMAGE_ONLY_REQUEST = "Build what the attached image(s) show."
 NO_SERVER = ("No agent server. Start it from Tools > Plugins > SALOME Agent in the SALOME "
              "window, then press Reconnect in the settings.")
 
 
 def parse_images(text: str) -> list[str]:
-    """The page's JSON list of data: URIs, checked: a known image type, base64
-    only, at most MAX_IMAGES of at most MAX_IMAGE_BYTES each. ValueError
-    otherwise."""
-    if not text:
-        return []
-    images = json.loads(text)
-    if not isinstance(images, list):
-        raise ValueError("expected a list of images")
-    if len(images) > MAX_IMAGES:
-        raise ValueError(f"at most {MAX_IMAGES} images per message")
-    for uri in images:
-        if not isinstance(uri, str) or not _IMAGE_URI.fullmatch(uri):
-            raise ValueError("only PNG, JPEG, WEBP, GIF and BMP images can be attached")
-        if (len(uri) - uri.index(",") - 1) * 3 // 4 > MAX_IMAGE_BYTES:
-            raise ValueError(f"an image is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
-    return images
+    """The page's JSON list of data: URIs, held to the engine's --images rules
+    (salome_agent.cli.check_image_uris). ValueError otherwise."""
+    from salome_agent.cli import check_image_uris
+
+    return check_image_uris(json.loads(text)) if text else []
 
 
 class Bridge(QObject):
