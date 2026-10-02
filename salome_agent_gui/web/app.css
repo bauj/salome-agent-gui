@@ -119,6 +119,13 @@ button { font: inherit; }
 .col { max-width: 720px; margin: 0 auto; padding: 0 18px; display: flex; flex-direction: column; gap: 18px; }
 
 .msg-user { display: flex; justify-content: flex-end; }
+.msg-user { flex-direction: column; align-items: flex-end; gap: 6px; }
+.msg-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 78%; }
+.msg-images img {
+  width: 120px; height: 120px; object-fit: cover; border-radius: 12px; cursor: zoom-in;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.msg-images img:only-child { width: auto; height: auto; max-width: 260px; max-height: 220px; }
 .msg-user .bubble {
   max-width: 78%;
   background: var(--user-bubble); color: #fff;
@@ -293,6 +300,21 @@ body.is-empty .empty { display: flex; }
   font: inherit; padding: 12px 14px 4px; min-height: 24px; max-height: 180px;
 }
 .composer textarea::placeholder { color: var(--text-3); }
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0; }
+.thumb { position: relative; width: 64px; height: 64px; }
+.thumb img {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 10px; cursor: zoom-in;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.thumb .remove {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
+  border-radius: 50%; border: 2px solid var(--surface); background: var(--text); color: var(--surface);
+  display: grid; place-items: center; cursor: pointer;
+}
+.thumb .remove svg { width: 10px; height: 10px; }
+.composer-row .icon-btn { width: 30px; height: 30px; margin-left: -6px; }
+.icon-btn.tip-up[data-tip]:hover:not(:disabled)::after { top: auto; bottom: 36px; left: 0; right: auto; }
+.composer-row .hint.error { color: var(--err); }
 .composer-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 12px; }
 .composer-row .hint { color: var(--text-3); font-size: 12px; }
 .mode {
@@ -308,6 +330,20 @@ body.is-empty .empty { display: flex; }
 .send svg { width: 17px; height: 17px; }
 .send.stop { background: var(--text); color: var(--surface); }
 .send:disabled { opacity: .4; cursor: default; }
+
+/* ---- image drop and viewer ---- */
+.drop-zone {
+  position: absolute; inset: 8px; z-index: 20; display: none; place-items: center;
+  border: 2px dashed var(--accent); border-radius: 16px; background: var(--accent-soft);
+  color: var(--accent); font-weight: 600; pointer-events: none; opacity: .95;
+}
+body.dragging .drop-zone { display: grid; }
+.lightbox {
+  position: absolute; inset: 0; z-index: 30; display: grid; place-items: center;
+  background: rgba(10, 14, 22, .8); cursor: zoom-out; padding: 24px;
+}
+.lightbox[hidden] { display: none; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; background: #fff; }
 
 /* ---- settings drawer ---- */
 .scrim {

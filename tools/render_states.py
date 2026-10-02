@@ -40,7 +40,7 @@ def main(argv) -> int:
         fake.emit("setTheme", {"theme": theme})
         for push_name, payload in STATES[name]:
             if push_name == "__js__":
-                view.page().runJavaScript(payload)
+                view.page().runJavaScript(resolve(payload))
             else:
                 fake.emit(push_name, resolve(payload))
         # grab() returns the last frame the renderer delivered: wait for the

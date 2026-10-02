@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from pathlib import Path
 
@@ -8,8 +9,32 @@ from salome_agent_gui import config_store, module_icons
 from salome_agent_gui.conversation_worker import ConversationWorker, default_open
 from salome_agent_gui.timeline import RunView, reasoning_key
 
+MAX_IMAGES = 6
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+# the formats the vision LLM accepts (salome_agent.cli._IMAGE_MIME_TYPES)
+_IMAGE_URI = re.compile(r"data:image/(png|jpeg|webp|gif|bmp);base64,[A-Za-z0-9+/]+={0,2}")
+IMAGE_ONLY_REQUEST = "Build what the attached image(s) show."
 NO_SERVER = ("No agent server. Start it from Tools > Plugins > SALOME Agent in the SALOME "
              "window, then press Reconnect in the settings.")
+
+
+def parse_images(text: str) -> list[str]:
+    """The page's JSON list of data: URIs, checked: a known image type, base64
+    only, at most MAX_IMAGES of at most MAX_IMAGE_BYTES each. ValueError
+    otherwise."""
+    if not text:
+        return []
+    images = json.loads(text)
+    if not isinstance(images, list):
+        raise ValueError("expected a list of images")
+    if len(images) > MAX_IMAGES:
+        raise ValueError(f"at most {MAX_IMAGES} images per message")
+    for uri in images:
+        if not isinstance(uri, str) or not _IMAGE_URI.fullmatch(uri):
+            raise ValueError("only PNG, JPEG, WEBP, GIF and BMP images can be attached")
+        if (len(uri) - uri.index(",") - 1) * 3 // 4 > MAX_IMAGE_BYTES:
+            raise ValueError(f"an image is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+    return images
 
 
 class Bridge(QObject):
@@ -47,7 +72,8 @@ class Bridge(QObject):
         self.page_ready = False
         self._editing = False
         self._status = {"state": "offline", "label": "Not connected", "detail": NO_SERVER}
-        self._items: list[tuple[str, object]] = []   # ("user"|"note", text) or ("turn", id)
+        # ("note", text), ("user", {"text", "images"}) or ("turn", id)
+        self._items: list[tuple[str, object]] = []
         self._turns: dict[int, RunView] = {}
         self._current: int | None = None
         self._next_turn = 0
@@ -110,6 +136,8 @@ class Bridge(QObject):
         for kind, value in self._items:
             if kind == "turn":
                 items.append({"type": "turn", "vm": self._vm(value)})
+            elif kind == "user":
+                items.append({"type": "user", **value})
             else:
                 items.append({"type": kind, "text": value})
         self._emit("replay", {"items": items})
@@ -199,15 +227,24 @@ class Bridge(QObject):
         self._emit("setSettings", self._settings())
         return True
 
-    @pyqtSlot(str)
-    def send(self, text: str) -> None:
+    @pyqtSlot(str, str)
+    def send(self, text: str, images_json: str = "") -> None:
+        """`images_json`: a JSON list of data: URIs attached to the message."""
         text = (text or "").strip()
-        if not text or self.busy or not self.connected:
+        if self.busy or not self.connected:
+            return
+        try:
+            images = parse_images(images_json)
+        except ValueError as e:
+            self._note(f"Message not sent: {e}")
+            return
+        if not text and not images:
             return
         if self.worker is None and not self._start_conversation():
             return
-        self._items.append(("user", text))
-        self._emit("addUser", {"text": text})
+        user = {"text": text, "images": images} if images else {"text": text}
+        self._items.append(("user", user))
+        self._emit("addUser", user)
         turn_id = self._next_turn
         self._next_turn += 1
         self._turns[turn_id] = RunView(clock=self._clock, usage_base=self._usage_base,
@@ -217,7 +254,7 @@ class Bridge(QObject):
         self._render()
         self.busy = True
         self.stopping = False
-        self.worker.submit(text)
+        self.worker.submit(text or IMAGE_ONLY_REQUEST, images)
         self._sync()
 
     def _on_event(self, ev: dict) -> None:

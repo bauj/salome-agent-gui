@@ -28,9 +28,10 @@ class FakeConv:
         self.next_status = None
         self.n_turns = 0
 
-    def turn(self, text, *, on_event, on_gate, cancel):
+    def turn(self, text, *, images=None, on_event, on_gate, cancel):
         rec = self.rec
         rec.setdefault("turns", []).append(text)
+        rec.setdefault("images", []).append(images)
         n, self.n_turns = self.n_turns, self.n_turns + 1
 
         def ev(kind, **data):

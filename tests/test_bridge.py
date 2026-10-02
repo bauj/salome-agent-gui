@@ -534,3 +534,64 @@ def test_reasoning_event_appends_without_re_rendering_the_turn(qtbot, bridges, c
                                          "channel": "reasoning", "text": "hmm"}
     b._render()
     assert vm(p)["stages"][0]["reasoning"] == [{"call": 2, "reasoning": "hmm", "prose": ""}]
+
+
+PNG = "data:image/png;base64,iVBORw0KGgo="
+
+
+def test_images_go_to_the_turn_and_into_the_transcript(qtbot, bridges, cfg_path):
+    rec = {}
+    b, p = make(bridges, cfg_path, rec)
+    b.probe()
+    b.send(" like this ", json.dumps([PNG]))
+    assert p.last("addUser") == {"text": "like this", "images": [PNG]}
+    b.gate(wait_gate(qtbot, p)["id"], "approve", "")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    say(qtbot, b, "taller")
+    assert rec["turns"] == ["like this", "taller"]
+    assert rec["images"] == [[PNG], None]
+    b.ready()
+    users = [i for i in p.last("replay")["items"] if i["type"] == "user"]
+    assert users == [{"type": "user", "text": "like this", "images": [PNG]},
+                     {"type": "user", "text": "taller"}]
+
+
+def test_images_alone_are_sent_with_a_stock_request(qtbot, bridges, cfg_path):
+    rec = {}
+    b, p = make(bridges, cfg_path, rec)
+    b.probe()
+    b.send("", json.dumps([PNG]))
+    assert p.last("addUser") == {"text": "", "images": [PNG]}
+    wait_gate(qtbot, p)
+    assert rec["turns"] == ["Build what the attached image(s) show."]
+
+
+@pytest.mark.parametrize("images", [
+    "not json", json.dumps(PNG), json.dumps([PNG] * 7), json.dumps([1]),
+    json.dumps(["data:image/svg+xml;base64,PHN2Zz4="]),
+    json.dumps(["data:text/html;base64,PGI+"]),
+    json.dumps(['data:image/png;base64,AA"onerror=x']),
+])
+def test_bad_images_are_refused_with_a_note(bridges, cfg_path, images):
+    b, p = make(bridges, cfg_path, {})
+    b.probe()
+    b.send("x", images)
+    assert b.worker is None and p.last("addUser") is None
+    assert p.last("addNote")["text"].startswith("Message not sent:")
+
+
+def test_an_oversized_image_is_refused(bridges, cfg_path, monkeypatch):
+    from salome_agent_gui import bridge as bridge_mod
+
+    monkeypatch.setattr(bridge_mod, "MAX_IMAGE_BYTES", 6)
+    b, p = make(bridges, cfg_path, {})
+    b.probe()
+    b.send("x", json.dumps(["data:image/png;base64," + "A" * 12]))
+    assert "larger than" in p.last("addNote")["text"] and b.worker is None
+
+
+def test_nothing_to_send_without_text_or_images(bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    b.probe()
+    b.send("   ", "[]")
+    assert b.worker is None and p.last("addUser") is None and p.last("addNote") is None

@@ -30,12 +30,14 @@
   taller", "add a chimney"). Undo and Redo step through turns; Rebuild recreates the study from
   the model when they got out of sync; New conversation starts over. While a conversation is
   open it keeps the agent server to itself. result.py and report.md are linked after each turn.
+  Attach sketches, photos or drawings with the paperclip, by dropping them on the window or by
+  pasting them: the model is built from what they show.
 </div>
 
 <div class="empty">
   <img class="logo-big" src="salome-s.png" alt="">
   <h2>What should we build?</h2>
-  <p>Describe a part or an assembly. I'll propose a plan, build it in this SALOME study, and you can keep refining it by chatting.</p>
+  <p>Describe a part or an assembly, or attach a sketch or a photo of it. I'll propose a plan, build it in this SALOME study, and you can keep refining it by chatting.</p>
   <div class="suggestions">
     <button class="suggestion" data-text="A small car with 4 torus wheels, red body and black wheels">A small car with 4 torus wheels<small>red body, black wheels</small></button>
     <button class="suggestion" data-text="A vase with a 2 mm wall, revolved profile and a filleted rim">A vase with a 2 mm wall<small>revolved profile, filleted rim</small></button>
@@ -47,9 +49,12 @@
 <main class="transcript" id="transcript"><div class="col" id="col"></div></main>
 
 <div class="composer-wrap">
-  <div class="composer">
+  <div class="composer" id="composer">
+    <div class="attachments" id="attachments" hidden></div>
     <textarea id="input" rows="1" placeholder="Describe what to build, or ask for a change…"></textarea>
     <div class="composer-row">
+      <button class="icon-btn tip-up" id="btn-attach" data-tip="Attach images"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button>
+      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
       <span class="mode" id="auto" title="Skips plan approval and the stage-failure prompt"><span class="switch small" id="batch-sw"></span>Run without asking</span>
       <span class="spacer"></span>
       <span class="hint" id="hint">Enter to send · Shift+Enter for a new line</span>
@@ -57,6 +62,9 @@
     </div>
   </div>
 </div>
+
+<div class="drop-zone" id="drop-zone"><div>Drop images to attach them</div></div>
+<div class="lightbox" id="lightbox" hidden><img id="lightbox-img" alt=""></div>
 
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer">

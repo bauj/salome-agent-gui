@@ -28,7 +28,8 @@ def create(parent, bridge):
         return fallback(parent, e)
     view = QWebEngineView(parent)
     view.setContextMenuPolicy(Qt.NoContextMenu)
-    view.setAcceptDrops(False)
+    # Drops reach the page (images to attach); app.js handles every drop, so a
+    # dropped file never makes the view navigate away from the chat.
     channel = QWebChannel(view.page())
     channel.registerObject("bridge", bridge)
     view.page().setWebChannel(channel)

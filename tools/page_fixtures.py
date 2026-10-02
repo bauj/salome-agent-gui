@@ -25,9 +25,9 @@ class FakeBridge(QObject):
     def ready(self):
         self.ready_calls += 1
 
-    @pyqtSlot(str)
-    def send(self, text):
-        self.calls.append(("send", text))
+    @pyqtSlot(str, str)
+    def send(self, text, images):
+        self.calls.append(("send", text, json.loads(images or "[]")))
 
     @pyqtSlot(int, str, str)
     def gate(self, gate_id, action, text):
@@ -130,6 +130,37 @@ HISTORY = [("addUser", {"text": USER_1}), ("renderTurn", DONE_VM),
            ("addUser", {"text": USER_2}), ("renderTurn", EDIT_VM),
            ("addUser", {"text": USER_3})]
 
+def sketch_uri(kind: str) -> str:
+    """A small drawing as a PNG data: URI, standing in for a user's photo or
+    sketch. Needs a QGuiApplication (built at push time, like `running`)."""
+    import base64
+
+    from PyQt5.QtCore import QBuffer, QByteArray, QIODevice, QPointF, Qt
+    from PyQt5.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
+
+    img = QImage(480, 360, QImage.Format_RGB32)
+    img.fill(QColor("#fbfaf6"))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor("#2b3a55"), 4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    if kind == "bracket":
+        p.drawPolygon(QPolygonF([QPointF(*xy) for xy in
+                                 ((80, 60), (160, 60), (160, 230), (400, 230), (400, 300),
+                                  (80, 300))]))
+        for x, y in ((120, 110), (120, 170), (250, 265), (340, 265)):
+            p.drawEllipse(QPointF(x, y), 14, 14)
+    else:
+        p.drawRect(90, 150, 300, 150)
+        p.drawPolygon(QPolygonF([QPointF(70, 150), QPointF(240, 50), QPointF(410, 150)]))
+        p.drawRect(210, 210, 60, 90)
+    p.end()
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.WriteOnly)
+    img.save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(bytes(data)).decode("ascii")
+
+
 STATES = {
     "empty": BASE + [("setBusy", IDLE_NEW)],
     "offline": [("setSettings", SETTINGS), ("setStatus", STATUS_OFF),
@@ -141,9 +172,22 @@ STATES = {
         ("addNote", {"text": "undo: undone back to turn 1"})],
     "settings": BASE + [("setBusy", IDLE_OPEN)] + HISTORY[:4] + [
         ("__js__", "document.body.classList.add('settings-open')")],
+    "images": BASE + [("setBusy", IDLE_OPEN), ("addUser", "sketch-message"),
+                      ("renderTurn", DONE_VM), ("__js__", "attach-sketches")],
 }
 
 
 def resolve(payload):
-    """`running` is built at push time so its live timer starts near 0:24."""
-    return running_vm() if payload == "running" else payload
+    """`running` is built at push time so its live timer starts near 0:24; the
+    sketches need the QApplication."""
+    if payload == "running":
+        return running_vm()
+    if payload == "sketch-message":
+        return {"text": "A bracket like this sketch, 5 mm thick",
+                "images": [sketch_uri("bracket")]}
+    if payload == "attach-sketches":
+        files = [{"name": "house-front.png", "url": sketch_uri("house")},
+                 {"name": "bracket.png", "url": sketch_uri("bracket")}]
+        return (f"attached = {json.dumps(files)}; renderAttachments(); "
+                "document.getElementById('input').value = 'Now add a house like these'; true")
+    return payload
