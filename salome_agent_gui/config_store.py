@@ -67,6 +67,15 @@ VERIFY_CADENCE = ("none", "final", "strict")
 PLAN_DETAIL = ("coarse", "balanced", "fine")
 # policy int knobs: (default, min, max)
 POLICY_INTS = {"exec_retries": (2, 0, 10), "tool_iteration_cap": (12, 1, 60)}
+# llm int knobs the Advanced fold edits: (default, min, max)
+LLM_INTS = {"reasoning_budget": (20000, 0, 200000), "vision_fix_retries": (2, 0, 5),
+            "timeout": (120, 10, 1800)}
+# llm.modules.<m> keys a module row edits; the others are kept as they are
+ROW_KEYS = ("model", "base_url", "api_key", "ssl_cert_file")
+# engine keys left to Edit JSON (tests/test_config_store.py checks the engine's list)
+JSON_ONLY = {"extra_headers", "extra_body", "module_extra_body", "json_retries", "max_retries",
+             "temperature"}
+MODULE_JSON_ONLY = {"extra_headers", "extra_body", "temperature", "timeout"}
 
 
 def _section(data, name: str) -> dict:
@@ -90,10 +99,74 @@ def _int(value) -> int | None:
         return None
 
 
-def _policy_int(policy: dict, key: str) -> int:
-    default, lo, hi = POLICY_INTS[key]
-    value = _int(policy.get(key))
+def _clamped(section: dict, key: str, table: dict) -> int:
+    default, lo, hi = table[key]
+    value = _int(section.get(key))
     return default if value is None else max(lo, min(hi, value))
+
+
+def _modules(value) -> dict:
+    """llm.modules / gui.parked_modules as {name: dict}; anything else dropped."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): v for k, v in value.items() if isinstance(v, dict)}
+
+
+def _merge(into: dict, src: dict) -> dict:
+    for name, d in src.items():
+        into[name] = {**into.get(name, {}), **d}
+    return into
+
+
+def _save_modules(data: dict, shared: bool, rows) -> None:
+    """The rows go to llm.modules, or to gui.parked_modules while every module
+    uses the shared model (the engine never reads `gui`). Keys the form does not
+    show are kept."""
+    llm, gui = data.setdefault("llm", {}), data.setdefault("gui", {})
+    store = _merge(_modules(gui.get("parked_modules")), _modules(llm.get("modules")))
+    for name, row in (rows if isinstance(rows, dict) else {}).items():
+        if not isinstance(row, dict):
+            continue
+        d = dict(store.get(name, {}))
+        for key in ROW_KEYS:
+            value = str(row.get(key) or "").strip()
+            if value:
+                d[key] = value
+            else:
+                d.pop(key, None)
+        if d:
+            store[name] = d
+        else:
+            store.pop(name, None)
+    if not shared:
+        # another host never gets the shared key (salome_agent.llm._build_endpoint)
+        shared_url = str(llm.get("base_url") or "").rstrip("/")
+        for name, d in store.items():
+            url = str(d.get("base_url") or "").rstrip("/")
+            if url and url != shared_url and not d.get("api_key"):
+                raise ValueError(f"{name}: a different endpoint needs its own API key")
+    llm.pop("modules", None)
+    gui.pop("parked_modules", None)
+    if store:
+        if shared:
+            gui["parked_modules"] = store
+        else:
+            llm["modules"] = store
+
+
+def model_label(settings: dict) -> tuple[str, str]:
+    """The model part of the header, and a tooltip listing each override."""
+    shared = settings.get("model") or "?"
+    if settings.get("shared_model", True):
+        return shared, ""
+    over = [(name, row.get("model") or shared)
+            for name, row in (settings.get("modules") or {}).items() if any(row.values())]
+    if not over:
+        return shared, ""
+    tip = "\n".join(f"{name}: {model}" for name, model in over)
+    if len(over) == 1:
+        return f"{shared} · {over[0][0]}: {over[0][1]}", tip
+    return f"{shared} · +{len(over)} overrides", tip
 
 
 def read_settings(path: Path) -> dict:
@@ -104,6 +177,8 @@ def read_settings(path: Path) -> dict:
     except (OSError, ValueError):
         data = {}
     llm, policy, gui = _section(data, "llm"), _section(data, "policy"), _section(data, "gui")
+    active = _modules(llm.get("modules"))
+    shown = active or _modules(gui.get("parked_modules"))
     return {
         **{k: llm.get(k, "") or "" for k in KEY_FIELDS},
         "on_stage_failure": policy.get("on_stage_failure") if policy.get("on_stage_failure") in ON_FAILURE else "abort",
@@ -114,13 +189,19 @@ def read_settings(path: Path) -> dict:
         "show_reasoning": bool(gui.get("show_reasoning", False)),
         "verify_cadence": policy.get("verify_cadence") if policy.get("verify_cadence") in VERIFY_CADENCE else "final",
         "plan_detail": policy.get("plan_detail") if policy.get("plan_detail") in PLAN_DETAIL else "balanced",
-        **{k: _policy_int(policy, k) for k in POLICY_INTS},
+        **{k: _clamped(policy, k, POLICY_INTS) for k in POLICY_INTS},
+        "shared_model": not active,
+        "modules": {name: {k: str(d.get(k) or "") for k in ROW_KEYS} for name, d in shown.items()},
+        "modules_json_only": {name: sorted(set(d) - set(ROW_KEYS))
+                              for name, d in shown.items() if set(d) - set(ROW_KEYS)},
+        **{k: _clamped(llm, k, LLM_INTS) for k in LLM_INTS},
     }
 
 
 def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None:
-    """Key fields and theme always; run options (policy + gui batch/verbose)
-    only when `run_options` — they are fixed while a conversation is open."""
+    """Key fields and theme always; run options (policy, gui batch/verbose, models,
+    advanced llm knobs) only when `run_options` — they are fixed while a
+    conversation is open."""
     data = json.loads(Path(path).read_text())
     data.setdefault("llm", {}).update({k: fields[k] for k in KEY_FIELDS if k in fields})
     gui = data.setdefault("gui", {})
@@ -142,6 +223,12 @@ def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None
             value = _int(fields.get(key))
             if value is not None:
                 policy[key] = max(lo, min(hi, value))
+        for key, (_, lo, hi) in LLM_INTS.items():
+            value = _int(fields.get(key))
+            if value is not None:
+                data["llm"][key] = max(lo, min(hi, value))
+        if "shared_model" in fields:
+            _save_modules(data, bool(fields["shared_model"]), fields.get("modules"))
         if "batch" in fields:
             gui["batch"] = bool(fields["batch"])
         if "verbose" in fields:
