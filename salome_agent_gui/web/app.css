@@ -20,8 +20,6 @@
   --badge-geom-soft: #f1ebfd;
   --badge-smesh: #0e8a7e;
   --badge-smesh-soft: #e3f5f3;
-  --badge-paravis: #c2410c;
-  --badge-paravis-soft: #fdebdc;
   --shadow: 0 1px 2px rgba(20, 30, 50, .06), 0 4px 16px rgba(20, 30, 50, .06);
   --radius: 14px;
   --mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
@@ -47,8 +45,6 @@
   --badge-geom-soft: #2d2445;
   --badge-smesh: #4fd1c1;
   --badge-smesh-soft: #163531;
-  --badge-paravis: #f59e6b;
-  --badge-paravis-soft: #3a2518;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
 }
 
@@ -191,7 +187,6 @@ button { font: inherit; }
 }
 .badge.geom { color: var(--badge-geom); background: var(--badge-geom-soft); }
 .badge.smesh { color: var(--badge-smesh); background: var(--badge-smesh-soft); }
-.badge.paravis { color: var(--badge-paravis); background: var(--badge-paravis-soft); }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
