@@ -445,7 +445,7 @@ def test_shared_model_hides_the_rows_and_saves_them_anyway(qtbot, page):
     saved = saved_settings(qtbot, fake)
     assert saved["shared_model"] is True
     assert (saved["reasoning_budget"], saved["vision_fix_retries"], saved["timeout"]) == (20000, 2, 120)
-    assert set(saved["modules"]) == {"planner", "vision", "geom", "smesh", "paravis", "amend"}
+    assert set(saved["modules"]) == {"planner", "vision", "geom", "smesh", "amend"}
 
 
 def test_module_rows_follow_the_engine_list_plus_unknown_entries(qtbot, page):
@@ -454,7 +454,7 @@ def test_module_rows_follow_the_engine_list_plus_unknown_entries(qtbot, page):
     wait_js(qtbot, view, "!document.getElementById('module-rows').hidden")
     names = run_js(qtbot, view, "[...document.querySelectorAll('.mod-row')]"
                                 ".map(r => r.dataset.module).join(',')")
-    assert names == "planner,vision,geom,smesh,paravis,amend,visio"
+    assert names == "planner,vision,geom,smesh,amend,visio"
     assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=amend] .mod-name')"
                                ".textContent") == "Chat edits"
     assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=vision] .json-only')"
