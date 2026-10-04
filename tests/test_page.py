@@ -3,8 +3,8 @@ import time
 import pytest
 
 from salome_agent_gui import web_view
-from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_OPEN, PLAN_VM,
-                                 SETTINGS, STATUS_OFF, STATUS_OK, FakeBridge)
+from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_NEW, IDLE_OPEN, PLAN_VM,
+                                 MODELS_SETTINGS, SETTINGS, STATUS_OFF, STATUS_OK, FakeBridge)
 
 pytestmark = pytest.mark.web
 
@@ -428,3 +428,74 @@ def test_an_image_only_message_has_no_empty_bubble_and_replays(qtbot, page):
     wait_js(qtbot, view, "document.querySelectorAll('.msg-user').length === 2")
     assert run_js(qtbot, view, "document.querySelectorAll('.msg-user .bubble').length") == 1
     assert run_js(qtbot, view, "document.querySelectorAll('.msg-images img').length") == 1
+
+
+def saved_settings(qtbot, fake):
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    return [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
+
+
+def test_shared_model_hides_the_rows_and_saves_them_anyway(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)                      # no conversation: run options unlocked
+    wait_js(qtbot, view, "document.getElementById('module-rows').hidden")
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["shared_model"] is True
+    assert (saved["reasoning_budget"], saved["vision_fix_retries"], saved["timeout"]) == (20000, 2, 120)
+    assert set(saved["modules"]) == {"planner", "vision", "geom", "smesh", "paravis", "amend"}
+
+
+def test_module_rows_follow_the_engine_list_plus_unknown_entries(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!document.getElementById('module-rows').hidden")
+    names = run_js(qtbot, view, "[...document.querySelectorAll('.mod-row')]"
+                                ".map(r => r.dataset.module).join(',')")
+    assert names == "planner,vision,geom,smesh,paravis,amend,visio"
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=amend] .mod-name')"
+                               ".textContent") == "Chat edits"
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=vision] .json-only')"
+                               ".textContent") == "also set in JSON: extra_body"
+    assert run_js(qtbot, view, "!document.querySelector('.mod-row[data-module=vision] "
+                               ".mod-endpoint').hidden") is True
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=geom] "
+                               ".mod-endpoint').hidden") is True
+
+
+def test_other_endpoint_without_key_keeps_the_drawer_open(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)                      # no conversation: run options unlocked
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-shared').click();"
+                        "const r = document.querySelector('.mod-row[data-module=vision]');"
+                        "r.querySelector('.linkish').click();"
+                        "r.querySelector('input[data-key=model]').value = 'reader';"
+                        "r.querySelector('input[data-key=base_url]').value = 'http://other/v1';"
+                        "document.getElementById('btn-save').click(); true")
+    wait_js(qtbot, view, "!document.getElementById('models-error').hidden")
+    assert "Vision: a different endpoint needs its own API key" in run_js(
+        qtbot, view, "document.getElementById('models-error').textContent")
+    assert run_js(qtbot, view, "document.body.classList.contains('settings-open')") is True
+    assert not any(c[0] == "saveSettings" for c in fake.calls)
+    run_js(qtbot, view, "document.querySelector('.mod-row[data-module=vision] "
+                        "input[data-key=api_key]').value = 'sk-2';"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["shared_model"] is False
+    assert saved["modules"]["vision"] == {"model": "reader", "base_url": "http://other/v1",
+                                          "api_key": "sk-2", "ssl_cert_file": ""}
+
+
+def test_models_and_advanced_lock_with_the_run_options(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(MODELS_SETTINGS, locked=True))
+    wait_js(qtbot, view, "document.getElementById('set-budget').disabled")
+    assert run_js(qtbot, view, "document.getElementById('set-shared').classList"
+                               ".contains('disabled')") is True
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#module-rows input')]"
+                               ".every(i => i.disabled)") is True
+    run_js(qtbot, view, "document.getElementById('set-shared').click(); true")
+    assert run_js(qtbot, view, "document.getElementById('set-shared').classList"
+                               ".contains('on')") is False

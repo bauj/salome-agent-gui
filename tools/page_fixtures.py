@@ -84,7 +84,15 @@ USER_3 = "add a spoiler on the back and mesh everything"
 SETTINGS = {"base_url": "http://llm.example/v1", "model": "auto", "api_key": "sk-test",
             "ssl_cert_file": "~/certs/ca.pem", "on_stage_failure": "abort", "tool_selection": "hints", "batch": False,
             "verbose": 0, "theme": "system", "locked": False,
-            "config_path": "~/.config/salome/salome-agent.json"}
+            "config_path": "~/.config/salome/salome-agent.json",
+            "shared_model": True, "modules": {}, "modules_json_only": {},
+            "module_names": ["planner", "vision", "geom", "smesh", "paravis", "amend"],
+            "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
+MODELS_SETTINGS = dict(SETTINGS, shared_model=False, modules={
+    "vision": {"model": "drawing-reader", "base_url": "http://reader.example/v1",
+               "api_key": "sk-reader", "ssl_cert_file": ""},
+    "visio": {"model": "typo", "base_url": "", "api_key": "", "ssl_cert_file": ""}},
+    modules_json_only={"vision": ["extra_body"]})
 STATUS_OK = {"state": "connected", "label": "GUI :46019 · auto", "detail": ""}
 STATUS_OFF = {"state": "offline", "label": "Not connected",
               "detail": "No agent server. Start it from Tools > Plugins > SALOME Agent in the "
@@ -172,6 +180,10 @@ STATES = {
         ("addNote", {"text": "undo: undone back to turn 1"})],
     "settings": BASE + [("setBusy", IDLE_OPEN)] + HISTORY[:4] + [
         ("__js__", "document.body.classList.add('settings-open')")],
+    "settings-models": [("setSettings", MODELS_SETTINGS), ("setStatus", STATUS_OK),
+                        ("setBusy", IDLE_NEW),
+                        ("__js__", "document.body.classList.add('settings-open');"
+                                   "document.getElementById('set-advanced').open = true; true")],
     "images": BASE + [("setBusy", IDLE_OPEN), ("addUser", "sketch-message"),
                       ("renderTurn", DONE_VM), ("__js__", "attach-sketches")],
 }
