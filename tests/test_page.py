@@ -564,3 +564,30 @@ def test_untouched_keyless_endpoint_row_still_saves(qtbot, page):
                         "document.getElementById('btn-save').click(); true")
     saved = saved_settings(qtbot, fake)
     assert saved["modules"]["vision"]["base_url"] == "http://localhost:11434/v1"
+
+
+def test_shared_toggle_sits_right_under_the_model_title(qtbot, page):
+    view, _ = page
+    assert run_js(qtbot, view, "document.getElementById('set-shared').closest('.toggle-row')"
+                               ".previousElementSibling.classList.contains('section-title')") is True
+
+
+def test_advanced_inputs_line_up(qtbot, page):
+    view, _ = page
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-advanced').open = true; true")
+    qtbot.wait(300)
+    tops = run_js(qtbot, view, "['set-budget', 'set-vision-fix'].map(id => "
+                               "Math.round(document.getElementById(id).getBoundingClientRect().top))")
+    assert tops[0] == tops[1]
+
+
+def test_settings_explain_options_in_tooltips_not_text(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!!document.querySelector('.mod-row')")
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#drawer .t-help')]"
+                               ".filter(n => !n.classList.contains('json-only')).length") == 0
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#drawer .toggle-row')]"
+                               ".every(r => r.title.length > 0)") is True
+    assert run_js(qtbot, view, "document.querySelector('.mod-row .linkish').title.length > 0") is True

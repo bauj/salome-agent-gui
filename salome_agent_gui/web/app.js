@@ -554,6 +554,7 @@ function moduleRow(name, row, jsonOnly, sharedModel) {
   line.appendChild(model);
   const link = el("button", "linkish", "other endpoint…");
   link.type = "button";
+  link.title = "Another base URL / key / CA for this module; a different host does not reuse the shared key";
   line.appendChild(link);
   r.appendChild(line);
   const ep = el("div", "mod-endpoint");
@@ -569,7 +570,6 @@ function moduleRow(name, row, jsonOnly, sharedModel) {
     f.appendChild(input);
     ep.appendChild(f);
   }
-  ep.appendChild(el("div", "t-help", "A different endpoint does not reuse the shared key."));
   link.addEventListener("click", () => { ep.hidden = !ep.hidden; });
   r.appendChild(ep);
   if (jsonOnly && jsonOnly.length) {
