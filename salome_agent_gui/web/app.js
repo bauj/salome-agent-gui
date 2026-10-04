@@ -480,13 +480,93 @@ function setTheme(p) {
 }
 
 // ---- settings -----------------------------------------------------------
+const MODULE_LABEL = { planner: "Planner", vision: "Vision", geom: "GEOM", smesh: "SMESH",
+                       paravis: "PARAVIS", amend: "Chat edits" };
+const ENDPOINT_FIELDS = [["base_url", "Base URL"], ["api_key", "API key", "password"],
+                         ["ssl_cert_file", "CA certificate file"]];
+
+function moduleRow(name, row, jsonOnly, sharedModel) {
+  const r = el("div", "mod-row");
+  r.dataset.module = name;
+  const line = el("div", "mod-line");
+  line.appendChild(el("span", "mod-name", MODULE_LABEL[name] || name));
+  const model = el("input", "mod-model");
+  model.dataset.key = "model";
+  model.placeholder = sharedModel || "shared model";
+  model.value = row.model || "";
+  line.appendChild(model);
+  const link = el("button", "linkish", "other endpoint…");
+  link.type = "button";
+  line.appendChild(link);
+  r.appendChild(line);
+  const ep = el("div", "mod-endpoint");
+  ep.hidden = !(row.base_url || row.api_key || row.ssl_cert_file);
+  for (const [key, label, type] of ENDPOINT_FIELDS) {
+    const f = el("div", "field");
+    f.appendChild(el("label", null, label));
+    const input = el("input");
+    input.dataset.key = key;
+    if (type) input.type = type;
+    input.value = row[key] || "";
+    f.appendChild(input);
+    ep.appendChild(f);
+  }
+  ep.appendChild(el("div", "t-help", "A different endpoint does not reuse the shared key."));
+  link.addEventListener("click", () => { ep.hidden = !ep.hidden; });
+  r.appendChild(ep);
+  if (jsonOnly && jsonOnly.length) {
+    r.appendChild(el("div", "t-help json-only", `also set in JSON: ${jsonOnly.join(", ")}`));
+  }
+  return r;
+}
+
+function renderModuleRows(s) {
+  const host = $("module-rows");
+  host.textContent = "";
+  const rows = s.modules || {};
+  const names = [...(s.module_names || [])];
+  for (const n of Object.keys(rows)) if (!names.includes(n)) names.push(n);
+  for (const n of names) {
+    host.appendChild(moduleRow(n, rows[n] || {}, (s.modules_json_only || {})[n], s.model));
+  }
+}
+
+function readModuleRows() {
+  const out = {};
+  for (const r of $("module-rows").querySelectorAll(".mod-row")) {
+    const row = {};
+    for (const input of r.querySelectorAll("input[data-key]")) {
+      row[input.dataset.key] = input.dataset.key === "api_key" ? input.value : input.value.trim();
+    }
+    out[r.dataset.module] = row;
+  }
+  return out;
+}
+
+// mirrors config_store._save_modules: another host never gets the shared key
+function modulesError(shared, rows, sharedUrl) {
+  if (shared) return "";
+  const base = sharedUrl.replace(/\/+$/, "");
+  for (const [name, r] of Object.entries(rows)) {
+    const url = (r.base_url || "").replace(/\/+$/, "");
+    if (url && url !== base && !r.api_key) {
+      return `${MODULE_LABEL[name] || name}: a different endpoint needs its own API key`;
+    }
+  }
+  return "";
+}
+
 function lockRunOptions(locked) {
   state.locked = locked;
   for (const id of ["set-on-failure", "set-tools", "set-verbose", "set-detail", "set-cadence",
-                    "set-exec-retries", "set-cap"]) $(id).disabled = locked;
+                    "set-exec-retries", "set-cap", "set-budget", "set-vision-fix",
+                    "set-timeout"]) $(id).disabled = locked;
+  for (const input of $("module-rows").querySelectorAll("input")) input.disabled = locked;
   $("set-batch").classList.toggle("disabled", locked);
+  $("set-shared").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
   $("run-lock").hidden = !locked;
+  $("model-lock").hidden = !locked;
 }
 
 function setSettings(s) {
@@ -507,6 +587,14 @@ function setSettings(s) {
   $("batch-sw").classList.toggle("on", !!s.batch);
   $("set-reasoning").classList.toggle("on", !!s.show_reasoning);
   document.body.classList.toggle("show-reasoning", !!s.show_reasoning);
+  const shared = s.shared_model !== false;
+  $("set-shared").classList.toggle("on", shared);
+  renderModuleRows(s);
+  $("module-rows").hidden = shared;
+  $("models-error").hidden = true;
+  $("set-budget").value = String(s.reasoning_budget ?? 20000);
+  $("set-vision-fix").value = String(s.vision_fix_retries ?? 2);
+  $("set-timeout").value = String(s.timeout ?? 120);
   $("config-path").textContent = s.config_path || "";
   lockRunOptions(!!s.locked);
 }
@@ -525,6 +613,14 @@ function saveSettings() {
     show_reasoning: $("set-reasoning").classList.contains("on"),
   };
   if (!state.locked) {
+    const shared = $("set-shared").classList.contains("on");
+    const modules = readModuleRows();
+    const err = modulesError(shared, modules, out.base_url);
+    if (err) {
+      $("models-error").textContent = err;
+      $("models-error").hidden = false;
+      return;
+    }
     Object.assign(out, {
       batch: $("set-batch").classList.contains("on"),
       on_stage_failure: $("set-on-failure").value,
@@ -534,6 +630,11 @@ function saveSettings() {
       verify_cadence: $("set-cadence").value,
       exec_retries: parseInt($("set-exec-retries").value, 10),
       tool_iteration_cap: parseInt($("set-cap").value, 10),
+      shared_model: shared,
+      modules,
+      reasoning_budget: parseInt($("set-budget").value, 10),
+      vision_fix_retries: parseInt($("set-vision-fix").value, 10),
+      timeout: parseInt($("set-timeout").value, 10),
     });
   }
   bridge.saveSettings(JSON.stringify(out));
@@ -661,6 +762,11 @@ function wire() {
   $("btn-reconnect").addEventListener("click", () => bridge.reconnect());
   $("btn-edit-json").addEventListener("click", () => bridge.editConfigJson());
   $("set-reasoning").addEventListener("click", () => $("set-reasoning").classList.toggle("on"));
+  $("set-shared").addEventListener("click", () => {
+    if (state.locked) return;
+    $("module-rows").hidden = $("set-shared").classList.toggle("on");
+    $("models-error").hidden = true;
+  });
   $("set-batch").addEventListener("click", () => {
     if (!state.locked) $("set-batch").classList.toggle("on");
   });
