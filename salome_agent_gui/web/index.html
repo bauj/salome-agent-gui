@@ -78,18 +78,18 @@
     </div>
     <div>
       <div class="section-title">Model <span class="lock-note" id="model-lock" hidden>— modules and advanced locked while a conversation is open</span></div>
+      <div class="toggle-row" title="Off: choose a model, or another endpoint, per module (e.g. a drawing reader for vision)"><div><div class="t-label">Same model for every module</div></div><span class="switch" id="set-shared"></span></div>
       <div class="field"><label for="set-base-url">LLM base URL</label><input id="set-base-url"></div>
       <div class="row2">
         <div class="field"><label for="set-model">Model</label><input id="set-model"></div>
         <div class="field"><label for="set-api-key">API key</label><input id="set-api-key" type="password"></div>
       </div>
       <div class="field"><label for="set-ssl-cert">CA certificate file</label><input id="set-ssl-cert" placeholder="System trust store"></div>
-      <div class="toggle-row"><div><div class="t-label">Same model for every module</div><div class="t-help">Off: choose a model, or another endpoint, per module (e.g. a drawing reader for vision)</div></div><span class="switch" id="set-shared"></span></div>
       <div id="module-rows" class="module-rows" hidden></div>
       <div class="err-note" id="models-error" hidden></div>
       <details class="advanced" id="set-advanced"><summary>Advanced</summary>
         <div class="row2">
-          <div class="field"><label for="set-budget">Reasoning budget (approx tokens, 0 = off)</label><input id="set-budget" type="number" min="0" max="200000" step="1000"></div>
+          <div class="field"><label for="set-budget" title="Approx tokens the model may think before it acts; 0 = no limit">Reasoning budget (0 = off)</label><input id="set-budget" type="number" min="0" max="200000" step="1000"></div>
           <div class="field"><label for="set-vision-fix">Vision fix rounds</label><input id="set-vision-fix" type="number" min="0" max="5" step="1"></div>
         </div>
         <div class="field"><label for="set-timeout">LLM timeout (s)</label><input id="set-timeout" type="number" min="10" max="1800" step="10"></div>
@@ -97,7 +97,7 @@
     </div>
     <div>
       <div class="section-title">Runs <span class="lock-note" id="run-lock" hidden>— locked while a conversation is open</span></div>
-      <div class="toggle-row"><div><div class="t-label">Run without asking</div><div class="t-help">Skips plan approval and the stage-failure prompt; a failed stage follows "When a stage fails"</div></div><span class="switch" id="set-batch"></span></div>
+      <div class="toggle-row" title="Skips plan approval and the stage-failure prompt; a failed stage follows &quot;When a stage fails&quot;"><div><div class="t-label">Run without asking</div></div><span class="switch" id="set-batch"></span></div>
       <div class="row2">
         <div class="field"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
         <div class="field"><label for="set-tools">Tools offered</label><select id="set-tools"><option value="hints">Planner hints</option><option value="all">All tools</option></select></div>
@@ -111,7 +111,7 @@
         <div class="field"><label for="set-cap">Tool calls per stage</label><input id="set-cap" type="number" min="1" max="60" step="1"></div>
       </div>
       <div class="field"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
-      <div class="toggle-row"><div><div class="t-label">Show model reasoning</div><div class="t-help">Debug: what the model thinks while it works, under each stage</div></div><span class="switch" id="set-reasoning"></span></div>
+      <div class="toggle-row" title="Debug: what the model thinks while it works, under each stage"><div><div class="t-label">Show model reasoning</div></div><span class="switch" id="set-reasoning"></span></div>
     </div>
     <div>
       <div class="section-title">Appearance</div>

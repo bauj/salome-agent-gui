@@ -206,7 +206,8 @@ STATES = {
     "settings-models": [("setSettings", MODELS_SETTINGS), ("setStatus", STATUS_OK),
                         ("setBusy", IDLE_NEW),
                         ("__js__", "document.body.classList.add('settings-open');"
-                                   "document.getElementById('set-advanced').open = true; true")],
+                                   "document.getElementById('set-advanced').open = true;"
+                                   "document.getElementById('set-advanced').scrollIntoView(); true")],
     "vision-running": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
                               ("renderTurn", "vision-running")],
     "vision-conflicts": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),

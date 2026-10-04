@@ -374,6 +374,7 @@ body.settings-open .drawer { transform: none; }
 .field input:focus, .field select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .field select:disabled, .field input:disabled { opacity: .5; }
 .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.row2 > .field { justify-content: flex-end; }   /* a wrapped label keeps the inputs level */
 .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
 .toggle-row .t-label { font-size: 13.5px; }
 .toggle-row .t-help { font-size: 12px; color: var(--text-3); }
