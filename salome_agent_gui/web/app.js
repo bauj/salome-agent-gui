@@ -461,8 +461,14 @@ function turnNode(vm) {
     const calls = (vm.reasoning || {})[key];
     if (calls && calls.length) turnReasoning.appendChild(reasoningNode(vm.id, key, calls));
   }
-  body.appendChild(turnReasoning);
+  // order of events: image read, then planning (its reasoning under the placeholder)
   if (vm.vision) body.appendChild(visionCard(vm));
+  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running"
+      && !(vm.vision && vm.vision.status === "running")) {
+    const planning = vm.reasoning && vm.reasoning.planner;
+    body.appendChild(el("div", "agent-text muted", planning ? "Planning…" : "Thinking…"));
+  }
+  body.appendChild(turnReasoning);
   if (gate && gate.kind === "plan") {
     const t = el("div", "agent-text", "Here's the plan. ");
     t.appendChild(el("span", "muted", "Approve it to start building, or edit the stages first."));
@@ -473,10 +479,6 @@ function turnNode(vm) {
   if (vm.edits.length) body.appendChild(editsCard(vm.edits));
   if (gate && gate.kind === "stage_failed") body.appendChild(failCard(vm, gate));
   if (!gate && vm.status !== "running") body.appendChild(resultBlock(vm));
-  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running"
-      && !(vm.vision && vm.vision.status === "running")) {
-    body.appendChild(el("div", "agent-text muted", "Thinking…"));
-  }
   return wrap;
 }
 

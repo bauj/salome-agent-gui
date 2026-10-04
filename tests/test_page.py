@@ -618,3 +618,30 @@ def test_long_status_label_stays_on_one_line_with_the_full_text_in_the_tooltip(q
     assert run_js(qtbot, view, f"{lab}.title") == "vision: opencode-go/deepseek-v4"
     fake.emit("setStatus", dict(STATUS_OK, label=long))
     wait_js(qtbot, view, f"{lab}.title === {long!r}")
+
+
+def _body_order(qtbot, view):
+    return run_js(qtbot, view, "[...document.querySelector('.agent-body').children]"
+                               ".filter(n => n.children.length || n.textContent.trim())"
+                               ".map(n => n.classList.contains('vision-card') ? 'vision'"
+                               " : n.classList.contains('turn-reasoning') ? 'reasoning'"
+                               " : n.textContent.trim()).join('|')")
+
+
+def test_planning_placeholder_sits_under_the_card_with_its_reasoning_below(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, id=4, stages=[], gate=None, status="running",
+              vision=dict(VISION_CONFLICTS_VM["vision"], status="done", conflicts=0),
+              reasoning={"planner": [{"call": 1, "reasoning": "two stages", "prose": ""}]})
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    assert _body_order(qtbot, view) == "vision|Planning…|reasoning"
+
+
+def test_edit_turn_keeps_thinking(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, id=4, stages=[], gate=None, status="running", vision=None,
+              reasoning={"edit": [{"call": 1, "reasoning": "widen it", "prose": ""}]})
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.turn-reasoning details')")
+    assert _body_order(qtbot, view) == "Thinking…|reasoning"
