@@ -539,8 +539,10 @@ function setTheme(p) {
 // ---- settings -----------------------------------------------------------
 const MODULE_LABEL = { planner: "Planner", vision: "Vision", geom: "GEOM", smesh: "SMESH",
                        paravis: "PARAVIS", amend: "Chat edits" };
-const ENDPOINT_FIELDS = [["base_url", "Base URL"], ["api_key", "API key", "password"],
-                         ["ssl_cert_file", "CA certificate file"]];
+const ENDPOINT_FIELDS = [
+  ["base_url", "Base URL", null, "This module's own endpoint; empty uses the shared one"],
+  ["api_key", "API key", "password", "Needed for another host: it never gets the shared key"],
+  ["ssl_cert_file", "CA certificate file", null, "CA bundle for this module's endpoint; empty uses the system trust store"]];
 
 function moduleRow(name, row, jsonOnly, sharedModel) {
   const r = el("div", "mod-row");
@@ -551,6 +553,7 @@ function moduleRow(name, row, jsonOnly, sharedModel) {
   model.dataset.key = "model";
   model.placeholder = sharedModel || "shared model";
   model.value = row.model || "";
+  model.title = "Model for this module only; empty uses the shared model";
   line.appendChild(model);
   const link = el("button", "linkish", "other endpoint…");
   link.type = "button";
@@ -559,8 +562,9 @@ function moduleRow(name, row, jsonOnly, sharedModel) {
   r.appendChild(line);
   const ep = el("div", "mod-endpoint");
   ep.hidden = !(row.base_url || row.api_key || row.ssl_cert_file);
-  for (const [key, label, type] of ENDPOINT_FIELDS) {
+  for (const [key, label, type, tip] of ENDPOINT_FIELDS) {
     const f = el("div", "field");
+    f.title = tip;
     f.appendChild(el("label", null, label));
     const input = el("input");
     input.dataset.key = key;

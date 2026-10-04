@@ -591,3 +591,14 @@ def test_settings_explain_options_in_tooltips_not_text(qtbot, page):
     assert run_js(qtbot, view, "[...document.querySelectorAll('#drawer .toggle-row')]"
                                ".every(r => r.title.length > 0)") is True
     assert run_js(qtbot, view, "document.querySelector('.mod-row .linkish').title.length > 0") is True
+
+
+def test_every_settings_option_has_a_tooltip(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!!document.querySelector('.mod-row')")
+    missing = run_js(qtbot, view,
+                     "[...document.querySelectorAll('#drawer .field, #drawer .toggle-row, "
+                     "#drawer .mod-model, #drawer .drawer-body button.btn')]"
+                     ".filter(n => !n.title).map(n => n.id || n.textContent.trim().slice(0, 30))")
+    assert missing == []
