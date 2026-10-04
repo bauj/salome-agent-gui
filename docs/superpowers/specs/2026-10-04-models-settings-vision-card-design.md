@@ -84,7 +84,10 @@ Starts with a submodule bump to the merged engine commit, verified with `git ls-
 - A row with an empty model and no endpoint fields is not written. A row writes only its non-empty fields,
   merged into the existing `llm.modules.<m>` dict, so keys the form does not show (`extra_body`,
   `extra_headers`, `temperature`) survive a save. Clearing a row removes the keys the form owns; an emptied
-  dict is removed.
+  dict is removed. Those hidden keys are often deliberate provider tuning (reasoning effort, thinking on/off
+  in `extra_body`), so the form never deletes what it cannot show; instead a row holding such keys shows a
+  line `also set in JSON: extra_body, temperature`, which stays after the row is cleared, so the module is
+  visibly not fully inherited.
 - Save refused, message shown in the drawer: a row with a base URL and no API key.
 - Switch on + Save: `llm.modules` moves to `gui.parked_modules` (merged, not overwritten). Switch off: the rows
   refill from `gui.parked_modules`, and Save moves them back to `llm.modules`. The engine never reads `gui`.
@@ -123,7 +126,8 @@ excludes it, and the vision card draws it inside itself, as stage cards do.
 
 ### GUI tests
 
-- `test_config_store`: rows written/omitted, merge keeps unknown module keys, park/unpark round trip,
+- `test_config_store`: rows written/omitted, merge keeps unknown module keys (and reports them for the
+  "also set in JSON" line), park/unpark round trip,
   key-required refusal, Advanced clamps, drift guard.
 - `test_timeline`: vision sequences (clean, fix rounds, conflicts, fatal while running) to view model;
   vision reasoning key.
