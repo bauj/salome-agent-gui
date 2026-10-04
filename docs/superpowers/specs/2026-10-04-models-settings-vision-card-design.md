@@ -37,8 +37,8 @@ already-shaped events and go to `on_event` through the mapper (`mapper.event(kin
 | `vision_check` | `attempt` (1-based), `of` (fix_retries), `errors` (list of str, the validator messages) | each validator pass that finds problems and leads to a fix call |
 | `vision_done` | `parts` (int), `conflicts` (int, errors left attached as conflicts), `seconds` (float, wall) | spec returned |
 
-An endpoint failure keeps today's path (`fatal` event). The model name comes from a small `LLMClient`
-accessor that resolves the module override (`model_for("vision")`).
+An endpoint failure keeps today's path (`fatal` event). The model name comes from the existing
+`LLMClient.endpoint("vision").model`, which already resolves the module override.
 
 ### Vision reasoning source
 
@@ -110,7 +110,8 @@ by the form or listed in `config_store.JSON_ONLY` (`extra_headers`, `extra_body`
 `RunView.vision`: `None` until `vision_start`, then
 `{status: running|done|conflicts|failed, images, sizes, model, checks: [{attempt, of, errors}], parts,
 conflicts, started_at, elapsed_s}`. `vision_check` appends to `checks`. `vision_done` sets `done`, or
-`conflicts` when conflicts > 0. A `fatal` while running sets `failed`.
+`conflicts` when conflicts > 0. A `fatal` while running sets `failed`; `aborted` (Stop) while running sets
+`stopped`, so the card never spins after the turn ends.
 
 Drawn above the stage cards, stage-card style, image icon, live timer while running:
 
