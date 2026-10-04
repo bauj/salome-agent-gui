@@ -164,6 +164,8 @@ function appendReasoning(p) {
   let host;
   if (p.key.startsWith("stage:")) {
     host = wrap.querySelector(`.step[data-stage="${p.key.slice(6)}"] .main`);
+  } else if (p.key === "vision") {
+    host = wrap.querySelector(".vision-card .vision-reasoning");
   } else {
     host = wrap.querySelector(".turn-reasoning");
   }
@@ -390,6 +392,59 @@ function resultBlock(vm) {
   return r;
 }
 
+const VISION_TITLE = { running: "Reading image", done: "Image read", conflicts: "Image read",
+                       failed: "Could not read the image", stopped: "Image reading stopped" };
+
+function visionCard(vm) {
+  const v = vm.vision;
+  const card = el("div", "card vision-card");
+  card.dataset.status = v.status;
+  const head = el("div", "card-head");
+  const [cls, icon] = (v.status === "running" ? STEP.running
+                       : v.status === "failed" ? STEP.failed
+                       : v.status === "stopped" ? STEP.stopped
+                       : v.status === "conflicts" ? ["st warn", "warn"] : STEP.ok);
+  const st = el("span", cls);
+  if (icon) svg(st, icon);
+  head.appendChild(st);
+  head.appendChild(el("span", null, VISION_TITLE[v.status] || "Image"));
+  head.appendChild(el("span", "count", `· ${plural(v.images, "image")}`));
+  const meta = el("span", "meta");
+  if (v.status === "running" && v.started_at) {
+    meta.dataset.start = v.started_at;
+    meta.textContent = fmtClock(Date.now() / 1000 - v.started_at);
+  } else if (v.elapsed_s !== null && v.elapsed_s !== undefined) {
+    meta.textContent = fmtDuration(v.elapsed_s);
+  }
+  head.appendChild(meta);
+  card.appendChild(head);
+  const body = el("div", "vision-body");
+  const facts = [...(v.sizes || []).map((s) => s.replace("x", "×")), v.model].filter(Boolean);
+  if (facts.length) body.appendChild(el("div", "vision-facts", facts.join(" · ")));
+  for (const c of v.checks || []) {
+    const d = el("details", "vision-check");
+    d.appendChild(el("summary", null,
+                     `Fix round ${c.attempt}/${c.of}: ${plural(c.errors.length, "problem")}`));
+    const ul = el("ul");
+    for (const e of c.errors) ul.appendChild(el("li", null, e));
+    d.appendChild(ul);
+    body.appendChild(d);
+  }
+  if (v.status === "done") {
+    body.appendChild(el("div", "vision-result", `Read ${plural(v.parts || 0, "part")}`));
+  } else if (v.status === "conflicts") {
+    body.appendChild(el("div", "vision-result warn",
+      `Read ${plural(v.parts || 0, "part")}, ${plural(v.conflicts, "problem")} left for the build`));
+  } else if (v.status === "failed" && v.error) {
+    body.appendChild(el("div", "err", v.error));
+  }
+  const rhost = el("div", "vision-reasoning");
+  if (v.reasoning && v.reasoning.length) rhost.appendChild(reasoningNode(vm.id, "vision", v.reasoning));
+  body.appendChild(rhost);
+  card.appendChild(body);
+  return card;
+}
+
 function turnNode(vm) {
   const wrap = el("div", "msg-agent");
   wrap.dataset.turn = String(vm.id);
@@ -407,6 +462,7 @@ function turnNode(vm) {
     if (calls && calls.length) turnReasoning.appendChild(reasoningNode(vm.id, key, calls));
   }
   body.appendChild(turnReasoning);
+  if (vm.vision) body.appendChild(visionCard(vm));
   if (gate && gate.kind === "plan") {
     const t = el("div", "agent-text", "Here's the plan. ");
     t.appendChild(el("span", "muted", "Approve it to start building, or edit the stages first."));
@@ -417,7 +473,8 @@ function turnNode(vm) {
   if (vm.edits.length) body.appendChild(editsCard(vm.edits));
   if (gate && gate.kind === "stage_failed") body.appendChild(failCard(vm, gate));
   if (!gate && vm.status !== "running") body.appendChild(resultBlock(vm));
-  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running") {
+  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running"
+      && !(vm.vision && vm.vision.status === "running")) {
     body.appendChild(el("div", "agent-text muted", "Thinking…"));
   }
   return wrap;
