@@ -3,8 +3,9 @@ import time
 import pytest
 
 from salome_agent_gui import web_view
-from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_OPEN, PLAN_VM,
-                                 SETTINGS, STATUS_OFF, STATUS_OK, FakeBridge)
+from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_NEW, IDLE_OPEN, PLAN_VM,
+                                 MODELS_SETTINGS, SETTINGS, STATUS_OFF, STATUS_OK,
+                                 VISION_CONFLICTS_VM, FakeBridge, vision_running_vm)
 
 pytestmark = pytest.mark.web
 
@@ -428,3 +429,219 @@ def test_an_image_only_message_has_no_empty_bubble_and_replays(qtbot, page):
     wait_js(qtbot, view, "document.querySelectorAll('.msg-user').length === 2")
     assert run_js(qtbot, view, "document.querySelectorAll('.msg-user .bubble').length") == 1
     assert run_js(qtbot, view, "document.querySelectorAll('.msg-images img').length") == 1
+
+
+def saved_settings(qtbot, fake):
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    return [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
+
+
+def test_shared_model_hides_the_rows_and_saves_them_anyway(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)                      # no conversation: run options unlocked
+    wait_js(qtbot, view, "document.getElementById('module-rows').hidden")
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["shared_model"] is True
+    assert (saved["reasoning_budget"], saved["vision_fix_retries"], saved["timeout"]) == (20000, 2, 120)
+    assert set(saved["modules"]) == {"planner", "vision", "geom", "smesh", "paravis", "amend"}
+
+
+def test_module_rows_follow_the_engine_list_plus_unknown_entries(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!document.getElementById('module-rows').hidden")
+    names = run_js(qtbot, view, "[...document.querySelectorAll('.mod-row')]"
+                                ".map(r => r.dataset.module).join(',')")
+    assert names == "planner,vision,geom,smesh,paravis,amend,visio"
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=amend] .mod-name')"
+                               ".textContent") == "Chat edits"
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=vision] .json-only')"
+                               ".textContent") == "also set in JSON: extra_body"
+    assert run_js(qtbot, view, "!document.querySelector('.mod-row[data-module=vision] "
+                               ".mod-endpoint').hidden") is True
+    assert run_js(qtbot, view, "document.querySelector('.mod-row[data-module=geom] "
+                               ".mod-endpoint').hidden") is True
+
+
+def test_other_endpoint_without_key_keeps_the_drawer_open(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)                      # no conversation: run options unlocked
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-shared').click();"
+                        "const r = document.querySelector('.mod-row[data-module=vision]');"
+                        "r.querySelector('.linkish').click();"
+                        "r.querySelector('input[data-key=model]').value = 'reader';"
+                        "r.querySelector('input[data-key=base_url]').value = 'http://other/v1';"
+                        "document.getElementById('btn-save').click(); true")
+    wait_js(qtbot, view, "!document.getElementById('models-error').hidden")
+    assert "Vision: a different endpoint needs its own API key" in run_js(
+        qtbot, view, "document.getElementById('models-error').textContent")
+    assert run_js(qtbot, view, "document.body.classList.contains('settings-open')") is True
+    assert not any(c[0] == "saveSettings" for c in fake.calls)
+    run_js(qtbot, view, "document.querySelector('.mod-row[data-module=vision] "
+                        "input[data-key=api_key]').value = 'sk-2';"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["shared_model"] is False
+    assert saved["modules"]["vision"] == {"model": "reader", "base_url": "http://other/v1",
+                                          "api_key": "sk-2", "ssl_cert_file": ""}
+
+
+def test_models_and_advanced_lock_with_the_run_options(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(MODELS_SETTINGS, locked=True))
+    wait_js(qtbot, view, "document.getElementById('set-budget').disabled")
+    assert run_js(qtbot, view, "document.getElementById('set-shared').classList"
+                               ".contains('disabled')") is True
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#module-rows input')]"
+                               ".every(i => i.disabled)") is True
+    run_js(qtbot, view, "document.getElementById('set-shared').click(); true")
+    assert run_js(qtbot, view, "document.getElementById('set-shared').classList"
+                               ".contains('on')") is False
+
+
+def test_vision_card_runs_with_a_timer_then_shows_conflicts(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", vision_running_vm())
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card[data-status=running]')")
+    head = run_js(qtbot, view, "document.querySelector('.vision-card .card-head').textContent")
+    assert head.startswith("Reading image")
+    assert run_js(qtbot, view, "!!document.querySelector('.vision-card [data-start]')") is True
+    assert "Fix round 1/2" in run_js(qtbot, view,
+                                     "document.querySelector('.vision-card').textContent")
+    fake.emit("renderTurn", VISION_CONFLICTS_VM)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card[data-status=conflicts]')")
+    text = run_js(qtbot, view, "document.querySelector('.vision-card').textContent")
+    assert "Read 3 parts, 2 problems left for the build" in text
+    assert run_js(qtbot, view, "!!document.querySelector('.vision-card [data-start]')") is False
+    order = run_js(qtbot, view, "[...document.querySelectorAll('.vision-card, .steps')]"
+                                ".map(n => n.className).join('|')")
+    assert order.startswith("card vision-card")          # the card sits above the plan
+
+
+def test_vision_errors_are_text(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, vision=dict(VISION_CONFLICTS_VM["vision"], checks=[
+        {"attempt": 1, "of": 1, "errors": [EVIL]}], model=EVIL))
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    assert run_js(qtbot, view, "document.querySelector('.vision-card img') === null") is True
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+
+
+def test_vision_reasoning_streams_into_the_card(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, show_reasoning=True))
+    fake.emit("renderTurn", vision_running_vm())
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    fake.emit("appendReasoning", {"turn": 3, "key": "vision", "call": 1,
+                                  "channel": "reasoning", "text": "the 80 is the width"})
+    wait_js(qtbot, view, "document.querySelector('.vision-card details.reasoning') !== null")
+    assert "the 80" in run_js(qtbot, view, "document.querySelector('.vision-card').textContent")
+
+
+def test_whitespace_key_counts_as_no_key(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-shared').click();"
+                        "const r = document.querySelector('.mod-row[data-module=vision]');"
+                        "r.querySelector('input[data-key=base_url]').value = 'http://other/v1';"
+                        "r.querySelector('input[data-key=api_key]').value = '   ';"
+                        "document.getElementById('btn-save').click(); true")
+    wait_js(qtbot, view, "!document.getElementById('models-error').hidden")
+    assert not any(c[0] == "saveSettings" for c in fake.calls)
+
+
+def test_untouched_keyless_endpoint_row_still_saves(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)
+    fake.emit("setSettings", dict(MODELS_SETTINGS, modules={"vision": {
+        "model": "x", "base_url": "http://localhost:11434/v1", "api_key": "", "ssl_cert_file": ""}}))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["modules"]["vision"]["base_url"] == "http://localhost:11434/v1"
+
+
+def test_shared_toggle_sits_right_under_the_model_title(qtbot, page):
+    view, _ = page
+    assert run_js(qtbot, view, "document.getElementById('set-shared').closest('.toggle-row')"
+                               ".previousElementSibling.classList.contains('section-title')") is True
+
+
+def test_advanced_inputs_line_up(qtbot, page):
+    view, _ = page
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-advanced').open = true; true")
+    qtbot.wait(300)
+    tops = run_js(qtbot, view, "['set-budget', 'set-vision-fix'].map(id => "
+                               "Math.round(document.getElementById(id).getBoundingClientRect().top))")
+    assert tops[0] == tops[1]
+
+
+def test_settings_explain_options_in_tooltips_not_text(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!!document.querySelector('.mod-row')")
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#drawer .t-help')]"
+                               ".filter(n => !n.classList.contains('json-only')).length") == 0
+    assert run_js(qtbot, view, "[...document.querySelectorAll('#drawer .toggle-row')]"
+                               ".every(r => r.title.length > 0)") is True
+    assert run_js(qtbot, view, "document.querySelector('.mod-row .linkish').title.length > 0") is True
+
+
+def test_every_settings_option_has_a_tooltip(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", MODELS_SETTINGS)
+    wait_js(qtbot, view, "!!document.querySelector('.mod-row')")
+    missing = run_js(qtbot, view,
+                     "[...document.querySelectorAll('#drawer .field, #drawer .toggle-row, "
+                     "#drawer .mod-model, #drawer .drawer-body button.btn')]"
+                     ".filter(n => !n.title).map(n => n.id || n.textContent.trim().slice(0, 30))")
+    assert missing == []
+
+
+def test_long_status_label_stays_on_one_line_with_the_full_text_in_the_tooltip(qtbot, page):
+    view, fake = page
+    long = "GUI :45691 · auto · vision: opencode-go/deepseek-v4-flash-vision-exp-subscription"
+    fake.emit("setStatus", dict(STATUS_OK, label=long, title="vision: opencode-go/deepseek-v4"))
+    wait_js(qtbot, view, f"document.getElementById('status-label').textContent === {long!r}")
+    view.resize(700, 760)
+    qtbot.wait(300)
+    lab = "document.getElementById('status-label')"
+    assert run_js(qtbot, view, f"getComputedStyle({lab}).textOverflow") == "ellipsis"
+    assert run_js(qtbot, view, f"{lab}.getClientRects().length") == 1
+    assert run_js(qtbot, view, f"{lab}.scrollWidth > {lab}.clientWidth") is True
+    assert run_js(qtbot, view, f"{lab}.title") == "vision: opencode-go/deepseek-v4"
+    fake.emit("setStatus", dict(STATUS_OK, label=long))
+    wait_js(qtbot, view, f"{lab}.title === {long!r}")
+
+
+def _body_order(qtbot, view):
+    return run_js(qtbot, view, "[...document.querySelector('.agent-body').children]"
+                               ".filter(n => n.children.length || n.textContent.trim())"
+                               ".map(n => n.classList.contains('vision-card') ? 'vision'"
+                               " : n.classList.contains('turn-reasoning') ? 'reasoning'"
+                               " : n.textContent.trim()).join('|')")
+
+
+def test_planning_placeholder_sits_under_the_card_with_its_reasoning_below(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, id=4, stages=[], gate=None, status="running",
+              vision=dict(VISION_CONFLICTS_VM["vision"], status="done", conflicts=0),
+              reasoning={"planner": [{"call": 1, "reasoning": "two stages", "prose": ""}]})
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    assert _body_order(qtbot, view) == "vision|Planning…|reasoning"
+
+
+def test_edit_turn_keeps_thinking(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, id=4, stages=[], gate=None, status="running", vision=None,
+              reasoning={"edit": [{"call": 1, "reasoning": "widen it", "prose": ""}]})
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.turn-reasoning details')")
+    assert _body_order(qtbot, view) == "Thinking…|reasoning"

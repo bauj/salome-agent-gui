@@ -43,6 +43,8 @@ class RunView:
     edit_ops: list[dict] = field(default_factory=list)
     # "planner" / "stage:<i>" / "edit" -> [{"call", "reasoning", "prose"}]
     reasoning: dict[str, list[dict]] = field(default_factory=dict)
+    # the image-reading step: None until vision_start (see _vision_view)
+    vision: dict | None = None
     usage_base: dict | None = None
     clock: Callable[[], float] = field(default=time.time, repr=False)
     batch: bool = False
@@ -109,11 +111,41 @@ class RunView:
                 calls.append({"call": d.get("call"), "reasoning": "", "prose": ""})
             channel = "prose" if d.get("channel") == "prose" else "reasoning"
             calls[-1][channel] += str(d.get("text") or "")
+        elif kind == "vision_start":
+            self.vision = {"status": "running", "images": int(d.get("images") or 0),
+                           "sizes": [str(s) for s in d.get("sizes") or []],
+                           "model": str(d.get("model") or ""), "checks": [], "parts": None,
+                           "conflicts": 0, "started_at": self.clock(), "elapsed_s": None,
+                           "error": None}
+        elif kind == "vision_check" and self.vision:
+            self.vision["checks"].append({"attempt": d.get("attempt"), "of": d.get("of"),
+                                          "errors": [str(e) for e in d.get("errors") or []]})
+        elif kind == "vision_done" and self.vision:
+            conflicts = int(d.get("conflicts") or 0)
+            self.vision.update(status="conflicts" if conflicts else "done",
+                               parts=d.get("parts"), conflicts=conflicts,
+                               elapsed_s=d.get("seconds"))
         elif kind == "fatal":
             self.fatal = d.get("message")
+            self._end_vision("failed", d.get("message"))
         elif kind == "aborted":
             self.aborted = True
             self.finished = True
+            self._end_vision("stopped")
+
+    def _end_vision(self, status: str, error=None) -> None:
+        if self.vision and self.vision["status"] == "running":
+            self.vision.update(status=status, error=error)
+
+    def _vision_view(self) -> dict | None:
+        if self.vision is None:
+            return None
+        v = dict(self.vision, sizes=list(self.vision["sizes"]),
+                 checks=[dict(c, errors=list(c["errors"])) for c in self.vision["checks"]],
+                 reasoning=_calls(self.reasoning.get("vision")))
+        if v["status"] != "running":
+            v["started_at"] = None
+        return v
 
     def status(self) -> str:
         if self.turn_status is not None:
@@ -181,13 +213,16 @@ class RunView:
             "files": {"result_py": self.result_py, "report_md": self.report_md},
             "usage": self.turn_usage(),
             "reasoning": {k: _calls(v) for k, v in self.reasoning.items()
-                          if not k.startswith("stage:")},
+                          if not k.startswith("stage:") and k != "vision"},
+            "vision": self._vision_view(),
         }
 
 
 def reasoning_key(d: dict) -> str:
     if d.get("source") == "stage":
         return f"stage:{d.get('index')}"
+    if d.get("source") == "vision":
+        return "vision"
     return "edit" if d.get("source") == "edit" else "planner"
 
 

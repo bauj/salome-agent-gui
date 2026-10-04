@@ -68,7 +68,7 @@ def _stage(index, module, intent, **kw):
 def _vm(turn_id, **kw):
     vm = {"id": turn_id, "stages": [], "edits": [], "gate": None, "status": "running",
           "message": "", "objects": [], "files": {"result_py": None, "report_md": None},
-          "usage": None}
+          "usage": None, "vision": None}
     vm.update(kw)
     return vm
 
@@ -84,7 +84,15 @@ USER_3 = "add a spoiler on the back and mesh everything"
 SETTINGS = {"base_url": "http://llm.example/v1", "model": "auto", "api_key": "sk-test",
             "ssl_cert_file": "~/certs/ca.pem", "on_stage_failure": "abort", "tool_selection": "hints", "batch": False,
             "verbose": 0, "theme": "system", "locked": False,
-            "config_path": "~/.config/salome/salome-agent.json"}
+            "config_path": "~/.config/salome/salome-agent.json",
+            "shared_model": True, "modules": {}, "modules_json_only": {},
+            "module_names": ["planner", "vision", "geom", "smesh", "paravis", "amend"],
+            "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
+MODELS_SETTINGS = dict(SETTINGS, shared_model=False, modules={
+    "vision": {"model": "drawing-reader", "base_url": "http://reader.example/v1",
+               "api_key": "sk-reader", "ssl_cert_file": ""},
+    "visio": {"model": "typo", "base_url": "", "api_key": "", "ssl_cert_file": ""}},
+    modules_json_only={"vision": ["extra_body"]})
 STATUS_OK = {"state": "connected", "label": "GUI :46019 · auto", "detail": ""}
 STATUS_OFF = {"state": "offline", "label": "Not connected",
               "detail": "No agent server. Start it from Tools > Plugins > SALOME Agent in the "
@@ -124,6 +132,29 @@ FAILED_VM = _vm(2, stages=[
     gate={"id": 2, "kind": "stage_failed", "stage": 1,
           "message": "Compute failed: NETGEN_3D could not mesh fuse_2\n"
                      "(self-intersecting faces near the spoiler posts)", "line": None})
+
+def _vision(**kw):
+    v = {"status": "done", "images": 1, "sizes": ["1200x800"], "model": "drawing-reader",
+         "checks": [], "parts": 3, "conflicts": 0, "started_at": None, "elapsed_s": 232.0,
+         "error": None, "reasoning": []}
+    v.update(kw)
+    return v
+
+
+VISION_CONFLICTS_VM = _vm(3, vision=_vision(
+    status="conflicts", conflicts=2,
+    checks=[{"attempt": 1, "of": 2, "errors": ["P1: profile is not closed", "R9 - 4X: 3 arcs found"]},
+            {"attempt": 2, "of": 2, "errors": ["P1: profile is not closed"]}]),
+    stages=[_stage(0, "geom", "Bracket plate with four holes, 5 mm thick")],
+    gate={"id": 3, "kind": "plan"})
+
+
+def vision_running_vm():
+    return _vm(3, vision=_vision(status="running", parts=None, elapsed_s=None,
+                                 started_at=time.time() - 134,
+                                 checks=[{"attempt": 1, "of": 2,
+                                          "errors": ["P2: hole overlaps the outline"]}]))
+
 
 BASE = [("setSettings", SETTINGS), ("setStatus", STATUS_OK)]
 HISTORY = [("addUser", {"text": USER_1}), ("renderTurn", DONE_VM),
@@ -172,6 +203,15 @@ STATES = {
         ("addNote", {"text": "undo: undone back to turn 1"})],
     "settings": BASE + [("setBusy", IDLE_OPEN)] + HISTORY[:4] + [
         ("__js__", "document.body.classList.add('settings-open')")],
+    "settings-models": [("setSettings", MODELS_SETTINGS), ("setStatus", STATUS_OK),
+                        ("setBusy", IDLE_NEW),
+                        ("__js__", "document.body.classList.add('settings-open');"
+                                   "document.getElementById('set-advanced').open = true;"
+                                   "document.getElementById('set-advanced').scrollIntoView(); true")],
+    "vision-running": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
+                              ("renderTurn", "vision-running")],
+    "vision-conflicts": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
+                                ("renderTurn", VISION_CONFLICTS_VM)],
     "images": BASE + [("setBusy", IDLE_OPEN), ("addUser", "sketch-message"),
                       ("renderTurn", DONE_VM), ("__js__", "attach-sketches")],
 }
@@ -182,6 +222,8 @@ def resolve(payload):
     sketches need the QApplication."""
     if payload == "running":
         return running_vm()
+    if payload == "vision-running":
+        return vision_running_vm()
     if payload == "sketch-message":
         return {"text": "A bracket like this sketch, 5 mm thick",
                 "images": [sketch_uri("bracket")]}
