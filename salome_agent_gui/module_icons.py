@@ -5,7 +5,8 @@ from pathlib import Path
 
 def icon_for(module: str, environ=None) -> str | None:
     """file:// URL of a SALOME module's own icon, read from
-    $<MODULE>_ROOT_DIR/share/salome/resources/<module>/SalomeApp.xml, or None."""
+    $<MODULE>_ROOT_DIR/share/salome/resources/<module>/SalomeApp.xml, else
+    LightApp.xml (SHAPER declares it there), or None."""
     env = os.environ if environ is None else environ
     name = str(module).lower()
     if not name.isalnum():
@@ -14,13 +15,20 @@ def icon_for(module: str, environ=None) -> str | None:
     if not root:
         return None
     res = Path(root) / "share" / "salome" / "resources" / name
+    for xml in ("SalomeApp.xml", "LightApp.xml"):
+        value = _icon_param(res / xml)
+        if value:
+            icon = res / value
+            return icon.as_uri() if icon.is_file() else None
+    return None
+
+
+def _icon_param(path: Path) -> str | None:
     try:
-        tree = ET.parse(res / "SalomeApp.xml")
+        tree = ET.parse(path)
     except (OSError, ET.ParseError):
         return None
     for param in tree.iter("parameter"):
-        value = param.get("value")
-        if param.get("name") == "icon" and value:
-            icon = res / value
-            return icon.as_uri() if icon.is_file() else None
+        if param.get("name") == "icon" and param.get("value"):
+            return param.get("value")
     return None
