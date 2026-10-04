@@ -78,14 +78,17 @@ button { font: inherit; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; flex: none; white-space: nowrap; }
 .brand .logo { width: 24px; height: 24px; object-fit: contain; }
 .status {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 3px 10px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-2); font-size: 12.5px;
   border: 1px solid var(--border);
+  min-width: 0;
 }
+/* one line, cut with an ellipsis; the full text is in its tooltip */
+#status-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
 .status.off .dot, .conn-card.off .dot { background: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
 .spacer { flex: 1; }

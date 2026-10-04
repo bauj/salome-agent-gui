@@ -523,7 +523,7 @@ function setStatus(p) {
   const connected = p.state === "connected";
   $("status").classList.toggle("off", !connected);
   $("status-label").textContent = p.label;
-  $("status-label").title = p.title || "";
+  $("status-label").title = p.title || p.label;
   $("banner").hidden = connected;
   $("banner").textContent = p.detail || "";
   $("conn-card").classList.toggle("off", !connected);
