@@ -206,7 +206,7 @@ function stepRow(s, vm) {
     img.title = String(s.module).toUpperCase();
     line.appendChild(img);
   } else {
-    const known = ["geom", "smesh"].includes(s.module) ? " " + s.module : "";
+    const known = ["geom", "smesh", "shaper"].includes(s.module) ? " " + s.module : "";
     line.appendChild(el("span", "badge" + known, s.module));
   }
   line.appendChild(el("span", "intent", s.intent));
@@ -539,7 +539,7 @@ function setTheme(p) {
 }
 
 // ---- settings -----------------------------------------------------------
-const MODULE_LABEL = { planner: "Planner", vision: "Vision", geom: "GEOM", smesh: "SMESH",
+const MODULE_LABEL = { planner: "Planner", vision: "Vision", geom: "GEOM", smesh: "SMESH", shaper: "SHAPER",
                        amend: "Chat edits" };
 const ENDPOINT_FIELDS = [
   ["base_url", "Base URL", null, "This module's own endpoint; empty uses the shared one"],

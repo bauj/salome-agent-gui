@@ -48,3 +48,14 @@ def test_xml_without_icon_parameter_gives_none(tmp_path):
 
 def test_module_name_with_path_characters_gives_none(tmp_path):
     assert icon_for("../geom", {"../GEOM_ROOT_DIR": str(tmp_path)}) is None
+
+
+def test_icon_falls_back_to_lightapp_xml(tmp_path):
+    # SHAPER declares its icon in LightApp.xml only.
+    root = _install(tmp_path, "shaper", "shaper.png",
+                    xml="<document><section name='SHAPER'/></document>")
+    res = root / "share/salome/resources/shaper"
+    (res / "LightApp.xml").write_text(
+        '<document><section name="SHAPER">'
+        '<parameter name="icon" value="shaper.png"/></section></document>')
+    assert icon_for("shaper", {"SHAPER_ROOT_DIR": str(root)}) == (res / "shaper.png").as_uri()
