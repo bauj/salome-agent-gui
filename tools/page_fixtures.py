@@ -68,7 +68,7 @@ def _stage(index, module, intent, **kw):
 def _vm(turn_id, **kw):
     vm = {"id": turn_id, "stages": [], "edits": [], "gate": None, "status": "running",
           "message": "", "objects": [], "files": {"result_py": None, "report_md": None},
-          "usage": None}
+          "usage": None, "vision": None}
     vm.update(kw)
     return vm
 
@@ -133,6 +133,29 @@ FAILED_VM = _vm(2, stages=[
           "message": "Compute failed: NETGEN_3D could not mesh fuse_2\n"
                      "(self-intersecting faces near the spoiler posts)", "line": None})
 
+def _vision(**kw):
+    v = {"status": "done", "images": 1, "sizes": ["1200x800"], "model": "drawing-reader",
+         "checks": [], "parts": 3, "conflicts": 0, "started_at": None, "elapsed_s": 232.0,
+         "error": None, "reasoning": []}
+    v.update(kw)
+    return v
+
+
+VISION_CONFLICTS_VM = _vm(3, vision=_vision(
+    status="conflicts", conflicts=2,
+    checks=[{"attempt": 1, "of": 2, "errors": ["P1: profile is not closed", "R9 - 4X: 3 arcs found"]},
+            {"attempt": 2, "of": 2, "errors": ["P1: profile is not closed"]}]),
+    stages=[_stage(0, "geom", "Bracket plate with four holes, 5 mm thick")],
+    gate={"id": 3, "kind": "plan"})
+
+
+def vision_running_vm():
+    return _vm(3, vision=_vision(status="running", parts=None, elapsed_s=None,
+                                 started_at=time.time() - 134,
+                                 checks=[{"attempt": 1, "of": 2,
+                                          "errors": ["P2: hole overlaps the outline"]}]))
+
+
 BASE = [("setSettings", SETTINGS), ("setStatus", STATUS_OK)]
 HISTORY = [("addUser", {"text": USER_1}), ("renderTurn", DONE_VM),
            ("addUser", {"text": USER_2}), ("renderTurn", EDIT_VM),
@@ -184,6 +207,10 @@ STATES = {
                         ("setBusy", IDLE_NEW),
                         ("__js__", "document.body.classList.add('settings-open');"
                                    "document.getElementById('set-advanced').open = true; true")],
+    "vision-running": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
+                              ("renderTurn", "vision-running")],
+    "vision-conflicts": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
+                                ("renderTurn", VISION_CONFLICTS_VM)],
     "images": BASE + [("setBusy", IDLE_OPEN), ("addUser", "sketch-message"),
                       ("renderTurn", DONE_VM), ("__js__", "attach-sketches")],
 }
@@ -194,6 +221,8 @@ def resolve(payload):
     sketches need the QApplication."""
     if payload == "running":
         return running_vm()
+    if payload == "vision-running":
+        return vision_running_vm()
     if payload == "sketch-message":
         return {"text": "A bracket like this sketch, 5 mm thick",
                 "images": [sketch_uri("bracket")]}

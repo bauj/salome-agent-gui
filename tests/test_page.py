@@ -4,7 +4,8 @@ import pytest
 
 from salome_agent_gui import web_view
 from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_NEW, IDLE_OPEN, PLAN_VM,
-                                 MODELS_SETTINGS, SETTINGS, STATUS_OFF, STATUS_OK, FakeBridge)
+                                 MODELS_SETTINGS, SETTINGS, STATUS_OFF, STATUS_OK,
+                                 VISION_CONFLICTS_VM, FakeBridge, vision_running_vm)
 
 pytestmark = pytest.mark.web
 
@@ -499,3 +500,43 @@ def test_models_and_advanced_lock_with_the_run_options(qtbot, page):
     run_js(qtbot, view, "document.getElementById('set-shared').click(); true")
     assert run_js(qtbot, view, "document.getElementById('set-shared').classList"
                                ".contains('on')") is False
+
+
+def test_vision_card_runs_with_a_timer_then_shows_conflicts(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", vision_running_vm())
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card[data-status=running]')")
+    head = run_js(qtbot, view, "document.querySelector('.vision-card .card-head').textContent")
+    assert head.startswith("Reading image")
+    assert run_js(qtbot, view, "!!document.querySelector('.vision-card [data-start]')") is True
+    assert "Fix round 1/2" in run_js(qtbot, view,
+                                     "document.querySelector('.vision-card').textContent")
+    fake.emit("renderTurn", VISION_CONFLICTS_VM)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card[data-status=conflicts]')")
+    text = run_js(qtbot, view, "document.querySelector('.vision-card').textContent")
+    assert "Read 3 parts, 2 problems left for the build" in text
+    assert run_js(qtbot, view, "!!document.querySelector('.vision-card [data-start]')") is False
+    order = run_js(qtbot, view, "[...document.querySelectorAll('.vision-card, .steps')]"
+                                ".map(n => n.className).join('|')")
+    assert order.startswith("card vision-card")          # the card sits above the plan
+
+
+def test_vision_errors_are_text(qtbot, page):
+    view, fake = page
+    vm = dict(VISION_CONFLICTS_VM, vision=dict(VISION_CONFLICTS_VM["vision"], checks=[
+        {"attempt": 1, "of": 1, "errors": [EVIL]}], model=EVIL))
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    assert run_js(qtbot, view, "document.querySelector('.vision-card img') === null") is True
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+
+
+def test_vision_reasoning_streams_into_the_card(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, show_reasoning=True))
+    fake.emit("renderTurn", vision_running_vm())
+    wait_js(qtbot, view, "!!document.querySelector('.vision-card')")
+    fake.emit("appendReasoning", {"turn": 3, "key": "vision", "call": 1,
+                                  "channel": "reasoning", "text": "the 80 is the width"})
+    wait_js(qtbot, view, "document.querySelector('.vision-card details.reasoning') !== null")
+    assert "the 80" in run_js(qtbot, view, "document.querySelector('.vision-card').textContent")
