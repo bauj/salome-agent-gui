@@ -164,6 +164,8 @@ function appendReasoning(p) {
   let host;
   if (p.key.startsWith("stage:")) {
     host = wrap.querySelector(`.step[data-stage="${p.key.slice(6)}"] .main`);
+  } else if (p.key === "vision") {
+    host = wrap.querySelector(".vision-card .vision-reasoning");
   } else {
     host = wrap.querySelector(".turn-reasoning");
   }
@@ -390,6 +392,59 @@ function resultBlock(vm) {
   return r;
 }
 
+const VISION_TITLE = { running: "Reading image", done: "Image read", conflicts: "Image read",
+                       failed: "Could not read the image", stopped: "Image reading stopped" };
+
+function visionCard(vm) {
+  const v = vm.vision;
+  const card = el("div", "card vision-card");
+  card.dataset.status = v.status;
+  const head = el("div", "card-head");
+  const [cls, icon] = (v.status === "running" ? STEP.running
+                       : v.status === "failed" ? STEP.failed
+                       : v.status === "stopped" ? STEP.stopped
+                       : v.status === "conflicts" ? ["st warn", "warn"] : STEP.ok);
+  const st = el("span", cls);
+  if (icon) svg(st, icon);
+  head.appendChild(st);
+  head.appendChild(el("span", null, VISION_TITLE[v.status] || "Image"));
+  head.appendChild(el("span", "count", `· ${plural(v.images, "image")}`));
+  const meta = el("span", "meta");
+  if (v.status === "running" && v.started_at) {
+    meta.dataset.start = v.started_at;
+    meta.textContent = fmtClock(Date.now() / 1000 - v.started_at);
+  } else if (v.elapsed_s !== null && v.elapsed_s !== undefined) {
+    meta.textContent = fmtDuration(v.elapsed_s);
+  }
+  head.appendChild(meta);
+  card.appendChild(head);
+  const body = el("div", "vision-body");
+  const facts = [...(v.sizes || []).map((s) => s.replace("x", "×")), v.model].filter(Boolean);
+  if (facts.length) body.appendChild(el("div", "vision-facts", facts.join(" · ")));
+  for (const c of v.checks || []) {
+    const d = el("details", "vision-check");
+    d.appendChild(el("summary", null,
+                     `Fix round ${c.attempt}/${c.of}: ${plural(c.errors.length, "problem")}`));
+    const ul = el("ul");
+    for (const e of c.errors) ul.appendChild(el("li", null, e));
+    d.appendChild(ul);
+    body.appendChild(d);
+  }
+  if (v.status === "done") {
+    body.appendChild(el("div", "vision-result", `Read ${plural(v.parts || 0, "part")}`));
+  } else if (v.status === "conflicts") {
+    body.appendChild(el("div", "vision-result warn",
+      `Read ${plural(v.parts || 0, "part")}, ${plural(v.conflicts, "problem")} left for the build`));
+  } else if (v.status === "failed" && v.error) {
+    body.appendChild(el("div", "err", v.error));
+  }
+  const rhost = el("div", "vision-reasoning");
+  if (v.reasoning && v.reasoning.length) rhost.appendChild(reasoningNode(vm.id, "vision", v.reasoning));
+  body.appendChild(rhost);
+  card.appendChild(body);
+  return card;
+}
+
 function turnNode(vm) {
   const wrap = el("div", "msg-agent");
   wrap.dataset.turn = String(vm.id);
@@ -406,6 +461,13 @@ function turnNode(vm) {
     const calls = (vm.reasoning || {})[key];
     if (calls && calls.length) turnReasoning.appendChild(reasoningNode(vm.id, key, calls));
   }
+  // order of events: image read, then planning (its reasoning under the placeholder)
+  if (vm.vision) body.appendChild(visionCard(vm));
+  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running"
+      && !(vm.vision && vm.vision.status === "running")) {
+    const planning = vm.reasoning && vm.reasoning.planner;
+    body.appendChild(el("div", "agent-text muted", planning ? "Planning…" : "Thinking…"));
+  }
   body.appendChild(turnReasoning);
   if (gate && gate.kind === "plan") {
     const t = el("div", "agent-text", "Here's the plan. ");
@@ -417,9 +479,6 @@ function turnNode(vm) {
   if (vm.edits.length) body.appendChild(editsCard(vm.edits));
   if (gate && gate.kind === "stage_failed") body.appendChild(failCard(vm, gate));
   if (!gate && vm.status !== "running") body.appendChild(resultBlock(vm));
-  if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running") {
-    body.appendChild(el("div", "agent-text muted", "Thinking…"));
-  }
   return wrap;
 }
 
@@ -466,6 +525,7 @@ function setStatus(p) {
   const connected = p.state === "connected";
   $("status").classList.toggle("off", !connected);
   $("status-label").textContent = p.label;
+  $("status-label").title = p.title || p.label;
   $("banner").hidden = connected;
   $("banner").textContent = p.detail || "";
   $("conn-card").classList.toggle("off", !connected);
@@ -479,13 +539,102 @@ function setTheme(p) {
 }
 
 // ---- settings -----------------------------------------------------------
+const MODULE_LABEL = { planner: "Planner", vision: "Vision", geom: "GEOM", smesh: "SMESH",
+                       paravis: "PARAVIS", amend: "Chat edits" };
+const ENDPOINT_FIELDS = [
+  ["base_url", "Base URL", null, "This module's own endpoint; empty uses the shared one"],
+  ["api_key", "API key", "password", "Needed for another host: it never gets the shared key"],
+  ["ssl_cert_file", "CA certificate file", null, "CA bundle for this module's endpoint; empty uses the system trust store"]];
+
+function moduleRow(name, row, jsonOnly, sharedModel) {
+  const r = el("div", "mod-row");
+  r.dataset.module = name;
+  const line = el("div", "mod-line");
+  line.appendChild(el("span", "mod-name", MODULE_LABEL[name] || name));
+  const model = el("input", "mod-model");
+  model.dataset.key = "model";
+  model.placeholder = sharedModel || "shared model";
+  model.value = row.model || "";
+  model.title = "Model for this module only; empty uses the shared model";
+  line.appendChild(model);
+  const link = el("button", "linkish", "other endpoint…");
+  link.type = "button";
+  link.title = "Another base URL / key / CA for this module; a different host does not reuse the shared key";
+  line.appendChild(link);
+  r.appendChild(line);
+  const ep = el("div", "mod-endpoint");
+  ep.hidden = !(row.base_url || row.api_key || row.ssl_cert_file);
+  for (const [key, label, type, tip] of ENDPOINT_FIELDS) {
+    const f = el("div", "field");
+    f.title = tip;
+    f.appendChild(el("label", null, label));
+    const input = el("input");
+    input.dataset.key = key;
+    if (type) input.type = type;
+    input.value = row[key] || "";
+    input.dataset.orig = input.value;
+    f.appendChild(input);
+    ep.appendChild(f);
+  }
+  link.addEventListener("click", () => { ep.hidden = !ep.hidden; });
+  r.appendChild(ep);
+  if (jsonOnly && jsonOnly.length) {
+    r.appendChild(el("div", "t-help json-only", `also set in JSON: ${jsonOnly.join(", ")}`));
+  }
+  return r;
+}
+
+function renderModuleRows(s) {
+  const host = $("module-rows");
+  host.textContent = "";
+  const rows = s.modules || {};
+  const names = [...(s.module_names || [])];
+  for (const n of Object.keys(rows)) if (!names.includes(n)) names.push(n);
+  for (const n of names) {
+    host.appendChild(moduleRow(n, rows[n] || {}, (s.modules_json_only || {})[n], s.model));
+  }
+}
+
+function readModuleRows() {
+  const out = {};
+  for (const r of $("module-rows").querySelectorAll(".mod-row")) {
+    const row = {};
+    for (const input of r.querySelectorAll("input[data-key]")) {
+      row[input.dataset.key] = input.dataset.key === "api_key" ? input.value : input.value.trim();
+    }
+    out[r.dataset.module] = row;
+  }
+  return out;
+}
+
+// mirrors config_store._save_modules: another host never gets the shared key;
+// only rows whose endpoint was edited here are checked
+function modulesError(shared, sharedUrl) {
+  if (shared) return "";
+  const base = sharedUrl.replace(/\/+$/, "");
+  for (const r of $("module-rows").querySelectorAll(".mod-row")) {
+    const field = (key) => r.querySelector(`.mod-endpoint input[data-key=${key}]`);
+    const edited = ["base_url", "api_key"].some((k) => field(k).value.trim() !== field(k).dataset.orig.trim());
+    const url = field("base_url").value.trim().replace(/\/+$/, "");
+    if (edited && url && url !== base && !field("api_key").value.trim()) {
+      const name = r.dataset.module;
+      return `${MODULE_LABEL[name] || name}: a different endpoint needs its own API key`;
+    }
+  }
+  return "";
+}
+
 function lockRunOptions(locked) {
   state.locked = locked;
   for (const id of ["set-on-failure", "set-tools", "set-verbose", "set-detail", "set-cadence",
-                    "set-exec-retries", "set-cap"]) $(id).disabled = locked;
+                    "set-exec-retries", "set-cap", "set-budget", "set-vision-fix",
+                    "set-timeout"]) $(id).disabled = locked;
+  for (const input of $("module-rows").querySelectorAll("input")) input.disabled = locked;
   $("set-batch").classList.toggle("disabled", locked);
+  $("set-shared").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
   $("run-lock").hidden = !locked;
+  $("model-lock").hidden = !locked;
 }
 
 function setSettings(s) {
@@ -506,6 +655,14 @@ function setSettings(s) {
   $("batch-sw").classList.toggle("on", !!s.batch);
   $("set-reasoning").classList.toggle("on", !!s.show_reasoning);
   document.body.classList.toggle("show-reasoning", !!s.show_reasoning);
+  const shared = s.shared_model !== false;
+  $("set-shared").classList.toggle("on", shared);
+  renderModuleRows(s);
+  $("module-rows").hidden = shared;
+  $("models-error").hidden = true;
+  $("set-budget").value = String(s.reasoning_budget ?? 20000);
+  $("set-vision-fix").value = String(s.vision_fix_retries ?? 2);
+  $("set-timeout").value = String(s.timeout ?? 120);
   $("config-path").textContent = s.config_path || "";
   lockRunOptions(!!s.locked);
 }
@@ -524,6 +681,14 @@ function saveSettings() {
     show_reasoning: $("set-reasoning").classList.contains("on"),
   };
   if (!state.locked) {
+    const shared = $("set-shared").classList.contains("on");
+    const modules = readModuleRows();
+    const err = modulesError(shared, out.base_url);
+    if (err) {
+      $("models-error").textContent = err;
+      $("models-error").hidden = false;
+      return;
+    }
     Object.assign(out, {
       batch: $("set-batch").classList.contains("on"),
       on_stage_failure: $("set-on-failure").value,
@@ -533,6 +698,11 @@ function saveSettings() {
       verify_cadence: $("set-cadence").value,
       exec_retries: parseInt($("set-exec-retries").value, 10),
       tool_iteration_cap: parseInt($("set-cap").value, 10),
+      shared_model: shared,
+      modules,
+      reasoning_budget: parseInt($("set-budget").value, 10),
+      vision_fix_retries: parseInt($("set-vision-fix").value, 10),
+      timeout: parseInt($("set-timeout").value, 10),
     });
   }
   bridge.saveSettings(JSON.stringify(out));
@@ -660,6 +830,11 @@ function wire() {
   $("btn-reconnect").addEventListener("click", () => bridge.reconnect());
   $("btn-edit-json").addEventListener("click", () => bridge.editConfigJson());
   $("set-reasoning").addEventListener("click", () => $("set-reasoning").classList.toggle("on"));
+  $("set-shared").addEventListener("click", () => {
+    if (state.locked) return;
+    $("module-rows").hidden = $("set-shared").classList.toggle("on");
+    $("models-error").hidden = true;
+  });
   $("set-batch").addEventListener("click", () => {
     if (!state.locked) $("set-batch").classList.toggle("on");
   });

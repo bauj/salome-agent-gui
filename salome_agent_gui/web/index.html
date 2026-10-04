@@ -74,43 +74,53 @@
   <div class="drawer-body">
     <div>
       <div class="section-title">Agent server</div>
-      <div class="conn-card" id="conn-card"><span class="dot"></span><span id="conn-label"></span><span class="spacer"></span><button class="btn ghost small" id="btn-reconnect">Reconnect</button></div>
+      <div class="conn-card" id="conn-card"><span class="dot"></span><span id="conn-label"></span><span class="spacer"></span><button class="btn ghost small" id="btn-reconnect" title="Look for the agent server SALOME runs again">Reconnect</button></div>
     </div>
     <div>
-      <div class="section-title">Model</div>
-      <div class="field"><label for="set-base-url">LLM base URL</label><input id="set-base-url"></div>
+      <div class="section-title">Model <span class="lock-note" id="model-lock" hidden>— modules and advanced locked while a conversation is open</span></div>
+      <div class="toggle-row" title="Off: choose a model, or another endpoint, per module (e.g. a drawing reader for vision)"><div><div class="t-label">Same model for every module</div></div><span class="switch" id="set-shared"></span></div>
+      <div class="field" title="Endpoint base URL, up to and including /v1"><label for="set-base-url">LLM base URL</label><input id="set-base-url"></div>
       <div class="row2">
-        <div class="field"><label for="set-model">Model</label><input id="set-model"></div>
-        <div class="field"><label for="set-api-key">API key</label><input id="set-api-key" type="password"></div>
+        <div class="field" title="Model name sent with every request (each module uses it unless overridden below)"><label for="set-model">Model</label><input id="set-model"></div>
+        <div class="field" title="Sent as Authorization: Bearer <key>; leave empty for an endpoint without auth"><label for="set-api-key">API key</label><input id="set-api-key" type="password"></div>
       </div>
-      <div class="field"><label for="set-ssl-cert">CA certificate file</label><input id="set-ssl-cert" placeholder="System trust store"></div>
+      <div class="field" title="CA bundle for an HTTPS endpoint with a private CA; empty uses the system trust store"><label for="set-ssl-cert">CA certificate file</label><input id="set-ssl-cert" placeholder="System trust store"></div>
+      <div id="module-rows" class="module-rows" hidden></div>
+      <div class="err-note" id="models-error" hidden></div>
+      <details class="advanced" id="set-advanced"><summary>Advanced</summary>
+        <div class="row2">
+          <div class="field" title="Approx tokens the model may think before it acts; past it the call is cut and re-asked once, a second cut ends the stage; 0 = no limit"><label for="set-budget">Reasoning budget (0 = off)</label><input id="set-budget" type="number" min="0" max="200000" step="1000"></div>
+          <div class="field" title="How many times the image reader is sent its spec's errors (open outline, arc off its radius, hole outside...) to fix them; errors left go to the build"><label for="set-vision-fix">Vision fix rounds</label><input id="set-vision-fix" type="number" min="0" max="5" step="1"></div>
+        </div>
+        <div class="field" title="Seconds one LLM call may run in total; a call still generating at the limit is cut and not retried"><label for="set-timeout">LLM timeout (s)</label><input id="set-timeout" type="number" min="10" max="1800" step="10"></div>
+      </details>
     </div>
     <div>
       <div class="section-title">Runs <span class="lock-note" id="run-lock" hidden>— locked while a conversation is open</span></div>
-      <div class="toggle-row"><div><div class="t-label">Run without asking</div><div class="t-help">Skips plan approval and the stage-failure prompt; a failed stage follows "When a stage fails"</div></div><span class="switch" id="set-batch"></span></div>
+      <div class="toggle-row" title="Skips plan approval and the stage-failure prompt; a failed stage follows &quot;When a stage fails&quot;"><div><div class="t-label">Run without asking</div></div><span class="switch" id="set-batch"></span></div>
       <div class="row2">
-        <div class="field"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
-        <div class="field"><label for="set-tools">Tools offered</label><select id="set-tools"><option value="hints">Planner hints</option><option value="all">All tools</option></select></div>
+        <div class="field" title="When running without asking: stop the run, or skip a stage that still fails after its retries and go on"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
+        <div class="field" title="Planner hints: geom is offered a small per-stage tool set and loads more on demand. All tools: the full geom set on every call"><label for="set-tools">Tools offered</label><select id="set-tools"><option value="hints">Planner hints</option><option value="all">All tools</option></select></div>
       </div>
       <div class="row2">
-        <div class="field"><label for="set-detail">Plan detail</label><select id="set-detail"><option value="coarse">Fewer stages</option><option value="balanced">Balanced</option><option value="fine">More stages</option></select></div>
-        <div class="field"><label for="set-cadence">Self-check</label><select id="set-cadence"><option value="none">Off</option><option value="final">Before finishing a stage</option><option value="strict">Strict</option></select></div>
+        <div class="field" title="How finely the planner splits a request into stages"><label for="set-detail">Plan detail</label><select id="set-detail"><option value="coarse">Fewer stages</option><option value="balanced">Balanced</option><option value="fine">More stages</option></select></div>
+        <div class="field" title="How hard geom is pushed to measure where its shapes landed. Before finishing: check once at the end. Strict: measure after every move or boolean"><label for="set-cadence">Self-check</label><select id="set-cadence"><option value="none">Off</option><option value="final">Before finishing a stage</option><option value="strict">Strict</option></select></div>
       </div>
       <div class="row2">
-        <div class="field"><label for="set-exec-retries">Retries after a failed run</label><input id="set-exec-retries" type="number" min="0" max="10" step="1"></div>
-        <div class="field"><label for="set-cap">Tool calls per stage</label><input id="set-cap" type="number" min="1" max="60" step="1"></div>
+        <div class="field" title="Per stage: how many times a script that fails in SALOME goes back to the model"><label for="set-exec-retries">Retries after a failed run</label><input id="set-exec-retries" type="number" min="0" max="10" step="1"></div>
+        <div class="field" title="Most model turns one stage may take (a turn can carry several tool calls)"><label for="set-cap">Tool calls per stage</label><input id="set-cap" type="number" min="1" max="60" step="1"></div>
       </div>
-      <div class="field"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
-      <div class="toggle-row"><div><div class="t-label">Show model reasoning</div><div class="t-help">Debug: what the model thinks while it works, under each stage</div></div><span class="switch" id="set-reasoning"></span></div>
+      <div class="field" title="How much the run logs. LLM trace also writes every prompt, response and reasoning to the run folder"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
+      <div class="toggle-row" title="Debug: what the model thinks while it works, under each stage"><div><div class="t-label">Show model reasoning</div></div><span class="switch" id="set-reasoning"></span></div>
     </div>
     <div>
       <div class="section-title">Appearance</div>
-      <div class="field"><label for="set-theme">Theme</label><select id="set-theme"><option value="system">Same as SALOME</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+      <div class="field" title="Chat window colours; Same as SALOME follows SALOME's theme"><label for="set-theme">Theme</label><select id="set-theme"><option value="system">Same as SALOME</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
     </div>
     <div>
       <div class="section-title">Configuration file</div>
       <div class="path" id="config-path"></div>
-      <div class="drawer-actions"><button class="btn" id="btn-edit-json">Edit JSON…</button></div>
+      <div class="drawer-actions"><button class="btn" id="btn-edit-json" title="Edit the whole configuration file, including keys the form does not show">Edit JSON…</button></div>
     </div>
   </div>
   <div class="drawer-foot"><button class="btn" id="btn-cancel">Cancel</button><button class="btn primary" id="btn-save">Save</button></div>

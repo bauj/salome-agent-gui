@@ -606,3 +606,19 @@ def test_nothing_to_send_without_text_or_images(bridges, cfg_path):
     b.probe()
     b.send("   ", "[]")
     assert b.worker is None and p.last("addUser") is None and p.last("addNote") is None
+
+
+def test_settings_carry_the_engine_module_names(bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    b.probe()
+    b.saveSettings(json.dumps({"theme": "dark"}))
+    names = p.last("setSettings")["module_names"]
+    assert names[:2] == ["planner", "vision"] and "geom" in names
+
+
+def test_header_names_the_vision_override(bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {})
+    b.saveSettings(json.dumps({"shared_model": False,
+                               "modules": {"vision": {"model": "reader"}}}))
+    st = p.last("setStatus")
+    assert st["label"].endswith("· vision: reader") and st["title"] == "vision: reader"

@@ -90,7 +90,8 @@ def test_view_model_shape_for_a_fresh_plan():
              "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": [],
              "reasoning": []}],
         "edits": [], "gate": None, "status": "running", "message": "", "objects": [],
-        "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {}}
+        "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {},
+        "vision": None}
 
 
 def test_view_model_icons_come_from_the_lookup():
@@ -271,3 +272,68 @@ def test_edit_turn_reasoning_is_turn_level():
     v.apply(_r("edit", 1, "prose", "Widening the box."))
     assert v.to_view_model(1)["reasoning"] == {
         "edit": [{"call": 1, "reasoning": "", "prose": "Widening the box."}]}
+
+
+def _reading(v, t=100.0):
+    v.clock = lambda: t
+    v.apply(ev("vision_start", images=1, sizes=["1200x800"], model="reader"))
+
+
+def test_vision_start_check_done():
+    v = RunView()
+    _reading(v)
+    vm = v.to_view_model(0)["vision"]
+    assert (vm["status"], vm["sizes"], vm["model"], vm["started_at"]) == (
+        "running", ["1200x800"], "reader", 100.0)
+    v.apply(ev("vision_check", attempt=1, of=2, errors=["P2: bad", "closure"]))
+    v.apply(ev("vision_done", parts=3, conflicts=0, seconds=232.4))
+    vm = v.to_view_model(0)["vision"]
+    assert vm["status"] == "done" and vm["parts"] == 3 and vm["elapsed_s"] == 232.4
+    assert vm["checks"] == [{"attempt": 1, "of": 2, "errors": ["P2: bad", "closure"]}]
+    assert vm["started_at"] is None
+
+
+def test_vision_conflicts_left():
+    v = RunView()
+    _reading(v)
+    v.apply(ev("vision_done", parts=3, conflicts=2, seconds=10.0))
+    assert v.to_view_model(0)["vision"]["status"] == "conflicts"
+
+
+def test_fatal_while_reading_fails_the_card():
+    v = RunView()
+    _reading(v)
+    v.apply(ev("fatal", message="LLM endpoint 404"))
+    vm = v.to_view_model(0)["vision"]
+    assert (vm["status"], vm["error"]) == ("failed", "LLM endpoint 404")
+
+
+def test_abort_while_reading_stops_the_card():
+    v = RunView()
+    _reading(v)
+    v.apply(ev("aborted"))
+    assert v.to_view_model(0)["vision"]["status"] == "stopped"
+
+
+def test_fatal_after_reading_leaves_the_card_done():
+    v = RunView()
+    _reading(v)
+    v.apply(ev("vision_done", parts=1, conflicts=0, seconds=3.0))
+    v.apply(ev("fatal", message="planner broke"))
+    assert v.to_view_model(0)["vision"]["status"] == "done"
+
+
+def test_no_images_no_vision():
+    v = RunView()
+    v.apply(ev("vision_check", attempt=1, of=2, errors=["x"]))   # stray: ignored
+    v.apply(ev("plan", stages=PLAN))
+    assert v.to_view_model(0)["vision"] is None
+
+
+def test_vision_reasoning_goes_to_the_card_not_the_turn():
+    v = RunView()
+    _reading(v)
+    v.apply(ev("reasoning", source="vision", index=None, call=1, channel="reasoning", text="80 mm"))
+    vm = v.to_view_model(0)
+    assert vm["vision"]["reasoning"] == [{"call": 1, "reasoning": "80 mm", "prose": ""}]
+    assert "vision" not in vm["reasoning"]
