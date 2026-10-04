@@ -77,8 +77,11 @@ class Bridge(QObject):
             self.push.emit(name, json.dumps(payload))
 
     def _settings(self) -> dict:
+        from salome_agent.modules import llm_module_names
+
         s = config_store.read_settings(self.config_path)
-        return {**s, "locked": self.worker is not None, "config_path": str(self.config_path)}
+        return {**s, "locked": self.worker is not None, "config_path": str(self.config_path),
+                "module_names": llm_module_names()}
 
     def _theme(self) -> dict:
         theme = config_store.read_settings(self.config_path)["theme"]
@@ -139,9 +142,9 @@ class Bridge(QObject):
         hs = self._probe_fn()
         self.connected = hs is not None
         if hs:
-            model = config_store.read_settings(self.config_path)["model"] or "?"
-            label = f"{str(hs.get('mode', '?')).upper()} :{hs.get('port', '?')} · {model}"
-            self._status = {"state": "connected", "label": label, "detail": ""}
+            models, tip = config_store.model_label(config_store.read_settings(self.config_path))
+            label = f"{str(hs.get('mode', '?')).upper()} :{hs.get('port', '?')} · {models}"
+            self._status = {"state": "connected", "label": label, "detail": "", "title": tip}
         else:
             self._status = {"state": "offline", "label": "Not connected", "detail": NO_SERVER}
         self._emit("setStatus", self._status)
