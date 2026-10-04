@@ -602,3 +602,19 @@ def test_every_settings_option_has_a_tooltip(qtbot, page):
                      "#drawer .mod-model, #drawer .drawer-body button.btn')]"
                      ".filter(n => !n.title).map(n => n.id || n.textContent.trim().slice(0, 30))")
     assert missing == []
+
+
+def test_long_status_label_stays_on_one_line_with_the_full_text_in_the_tooltip(qtbot, page):
+    view, fake = page
+    long = "GUI :45691 · auto · vision: opencode-go/deepseek-v4-flash-vision-exp-subscription"
+    fake.emit("setStatus", dict(STATUS_OK, label=long, title="vision: opencode-go/deepseek-v4"))
+    wait_js(qtbot, view, f"document.getElementById('status-label').textContent === {long!r}")
+    view.resize(700, 760)
+    qtbot.wait(300)
+    lab = "document.getElementById('status-label')"
+    assert run_js(qtbot, view, f"getComputedStyle({lab}).textOverflow") == "ellipsis"
+    assert run_js(qtbot, view, f"{lab}.getClientRects().length") == 1
+    assert run_js(qtbot, view, f"{lab}.scrollWidth > {lab}.clientWidth") is True
+    assert run_js(qtbot, view, f"{lab}.title") == "vision: opencode-go/deepseek-v4"
+    fake.emit("setStatus", dict(STATUS_OK, label=long))
+    wait_js(qtbot, view, f"{lab}.title === {long!r}")
