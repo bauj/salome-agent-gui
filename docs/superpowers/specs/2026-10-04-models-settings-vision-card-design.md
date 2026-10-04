@@ -88,7 +88,8 @@ Starts with a submodule bump to the merged engine commit, verified with `git ls-
   in `extra_body`), so the form never deletes what it cannot show; instead a row holding such keys shows a
   line `also set in JSON: extra_body, temperature`, which stays after the row is cleared, so the module is
   visibly not fully inherited.
-- Save refused, message shown in the drawer: a row with a base URL and no API key.
+- Save refused, message shown in the drawer: a row whose base URL or key was edited in the form, left
+  with another host and no API key. A keyless endpoint set in JSON (a local gateway) does not block saves.
 - Switch on + Save: `llm.modules` moves to `gui.parked_modules` (merged, not overwritten). Switch off: the rows
   refill from `gui.parked_modules`, and Save moves them back to `llm.modules`. The engine never reads `gui`.
 - `read_settings` stays non-raising (broken file reads as defaults).

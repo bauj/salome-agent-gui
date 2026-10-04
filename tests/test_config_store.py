@@ -303,3 +303,21 @@ def test_every_engine_llm_key_is_in_the_form_or_json_only():
     assert not missing, f"engine llm keys with no place in the drawer: {missing}"
     missing = sorted(MODULE_LLM_KEYS - set(cs.ROW_KEYS) - cs.MODULE_JSON_ONLY)
     assert not missing, f"engine llm.modules keys with no place in the drawer: {missing}"
+
+
+def test_untouched_keyless_endpoint_row_does_not_block_a_save(tmp_path):
+    p = _cfg(tmp_path, llm={"modules": {"vision": {"base_url": "http://localhost:11434/v1",
+                                                   "model": "x"}}})
+    cs.save_settings(p, {"shared_model": False, "theme": "dark",
+                         "modules": {"vision": _row(model="x",
+                                                    base_url="http://localhost:11434/v1")}})
+    assert json.loads(p.read_text())["gui"]["theme"] == "dark"
+
+
+def test_parked_rows_show_with_active_ones_and_survive_a_save(tmp_path):
+    p = _cfg(tmp_path, llm={"modules": {"geom": {"model": "g"}}},
+             gui={"parked_modules": {"vision": {"model": "r", "api_key": "k2"}}})
+    s = cs.read_settings(p)
+    assert s["modules"]["vision"] == _row(model="r", api_key="k2")
+    cs.save_settings(p, {"shared_model": False, "modules": s["modules"]})
+    assert json.loads(p.read_text())["llm"]["modules"]["vision"] == {"model": "r", "api_key": "k2"}

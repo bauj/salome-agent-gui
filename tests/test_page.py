@@ -540,3 +540,27 @@ def test_vision_reasoning_streams_into_the_card(qtbot, page):
                                   "channel": "reasoning", "text": "the 80 is the width"})
     wait_js(qtbot, view, "document.querySelector('.vision-card details.reasoning') !== null")
     assert "the 80" in run_js(qtbot, view, "document.querySelector('.vision-card').textContent")
+
+
+def test_whitespace_key_counts_as_no_key(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-shared').click();"
+                        "const r = document.querySelector('.mod-row[data-module=vision]');"
+                        "r.querySelector('input[data-key=base_url]').value = 'http://other/v1';"
+                        "r.querySelector('input[data-key=api_key]').value = '   ';"
+                        "document.getElementById('btn-save').click(); true")
+    wait_js(qtbot, view, "!document.getElementById('models-error').hidden")
+    assert not any(c[0] == "saveSettings" for c in fake.calls)
+
+
+def test_untouched_keyless_endpoint_row_still_saves(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)
+    fake.emit("setSettings", dict(MODELS_SETTINGS, modules={"vision": {
+        "model": "x", "base_url": "http://localhost:11434/v1", "api_key": "", "ssl_cert_file": ""}}))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-save').click(); true")
+    saved = saved_settings(qtbot, fake)
+    assert saved["modules"]["vision"]["base_url"] == "http://localhost:11434/v1"
