@@ -86,7 +86,7 @@ SETTINGS = {"base_url": "http://llm.example/v1", "model": "auto", "api_key": "sk
             "verbose": 0, "theme": "system", "locked": False,
             "config_path": "~/.config/salome/salome-agent.json",
             "shared_model": True, "modules": {}, "modules_json_only": {},
-            "module_names": ["planner", "vision", "geom", "smesh", "paravis", "amend"],
+            "module_names": ["planner", "vision", "geom", "smesh", "amend"],
             "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
 MODELS_SETTINGS = dict(SETTINGS, shared_model=False, modules={
     "vision": {"model": "drawing-reader", "base_url": "http://reader.example/v1",
