@@ -565,6 +565,7 @@ function moduleRow(name, row, jsonOnly, sharedModel) {
     input.dataset.key = key;
     if (type) input.type = type;
     input.value = row[key] || "";
+    input.dataset.orig = input.value;
     f.appendChild(input);
     ep.appendChild(f);
   }
@@ -600,13 +601,17 @@ function readModuleRows() {
   return out;
 }
 
-// mirrors config_store._save_modules: another host never gets the shared key
-function modulesError(shared, rows, sharedUrl) {
+// mirrors config_store._save_modules: another host never gets the shared key;
+// only rows whose endpoint was edited here are checked
+function modulesError(shared, sharedUrl) {
   if (shared) return "";
   const base = sharedUrl.replace(/\/+$/, "");
-  for (const [name, r] of Object.entries(rows)) {
-    const url = (r.base_url || "").replace(/\/+$/, "");
-    if (url && url !== base && !r.api_key) {
+  for (const r of $("module-rows").querySelectorAll(".mod-row")) {
+    const field = (key) => r.querySelector(`.mod-endpoint input[data-key=${key}]`);
+    const edited = ["base_url", "api_key"].some((k) => field(k).value.trim() !== field(k).dataset.orig.trim());
+    const url = field("base_url").value.trim().replace(/\/+$/, "");
+    if (edited && url && url !== base && !field("api_key").value.trim()) {
+      const name = r.dataset.module;
       return `${MODULE_LABEL[name] || name}: a different endpoint needs its own API key`;
     }
   }
@@ -672,7 +677,7 @@ function saveSettings() {
   if (!state.locked) {
     const shared = $("set-shared").classList.contains("on");
     const modules = readModuleRows();
-    const err = modulesError(shared, modules, out.base_url);
+    const err = modulesError(shared, out.base_url);
     if (err) {
       $("models-error").textContent = err;
       $("models-error").hidden = false;

@@ -124,16 +124,20 @@ def _save_modules(data: dict, shared: bool, rows) -> None:
     show are kept."""
     llm, gui = data.setdefault("llm", {}), data.setdefault("gui", {})
     store = _merge(_modules(gui.get("parked_modules")), _modules(llm.get("modules")))
+    edited = set()
     for name, row in (rows if isinstance(rows, dict) else {}).items():
         if not isinstance(row, dict):
             continue
-        d = dict(store.get(name, {}))
+        old = store.get(name, {})
+        d = dict(old)
         for key in ROW_KEYS:
             value = str(row.get(key) or "").strip()
             if value:
                 d[key] = value
             else:
                 d.pop(key, None)
+        if any(d.get(k) != old.get(k) for k in ("base_url", "api_key")):
+            edited.add(name)
         if d:
             store[name] = d
         else:
@@ -141,7 +145,10 @@ def _save_modules(data: dict, shared: bool, rows) -> None:
     if not shared:
         # another host never gets the shared key (salome_agent.llm._build_endpoint)
         shared_url = str(llm.get("base_url") or "").rstrip("/")
-        for name, d in store.items():
+        # only endpoints edited here: a keyless one set in JSON (a local
+        # gateway) must not block every later save
+        for name in edited & set(store):
+            d = store[name]
             url = str(d.get("base_url") or "").rstrip("/")
             if url and url != shared_url and not d.get("api_key"):
                 raise ValueError(f"{name}: a different endpoint needs its own API key")
@@ -178,7 +185,7 @@ def read_settings(path: Path) -> dict:
         data = {}
     llm, policy, gui = _section(data, "llm"), _section(data, "policy"), _section(data, "gui")
     active = _modules(llm.get("modules"))
-    shown = active or _modules(gui.get("parked_modules"))
+    shown = _merge(_modules(gui.get("parked_modules")), active)
     return {
         **{k: llm.get(k, "") or "" for k in KEY_FIELDS},
         "on_stage_failure": policy.get("on_stage_failure") if policy.get("on_stage_failure") in ON_FAILURE else "abort",
