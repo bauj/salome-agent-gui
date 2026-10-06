@@ -45,7 +45,7 @@ def edit_plan(parent, plan: list) -> list | None:
         out = normalize_plan(json.loads(text))
         if out is None:
             raise ValueError("need a non-empty JSON list of stages, "
-                             "each with module geom|smesh")
+                             "each with module geom|shaper|smesh")
         result["plan"] = out
 
     dlg = JsonEditDialog(parent, "Edit plan", json.dumps(plan, indent=2), validate)
