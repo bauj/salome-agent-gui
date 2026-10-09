@@ -627,7 +627,7 @@ function modulesError(shared, sharedUrl) {
 function lockRunOptions(locked) {
   state.locked = locked;
   for (const id of ["set-on-failure", "set-tools", "set-verbose", "set-detail", "set-cadence",
-                    "set-exec-retries", "set-cap", "set-budget", "set-vision-fix",
+                    "set-cap", "set-budget", "set-vision-fix",
                     "set-timeout"]) $(id).disabled = locked;
   for (const input of $("module-rows").querySelectorAll("input")) input.disabled = locked;
   $("set-batch").classList.toggle("disabled", locked);
@@ -648,7 +648,6 @@ function setSettings(s) {
   $("set-verbose").value = String(s.verbose);
   $("set-detail").value = s.plan_detail || "balanced";
   $("set-cadence").value = s.verify_cadence || "final";
-  $("set-exec-retries").value = String(s.exec_retries ?? 2);
   $("set-cap").value = String(s.tool_iteration_cap ?? 12);
   $("set-theme").value = s.theme;
   $("set-batch").classList.toggle("on", !!s.batch);
@@ -696,7 +695,6 @@ function saveSettings() {
       verbose: parseInt($("set-verbose").value, 10),
       plan_detail: $("set-detail").value,
       verify_cadence: $("set-cadence").value,
-      exec_retries: parseInt($("set-exec-retries").value, 10),
       tool_iteration_cap: parseInt($("set-cap").value, 10),
       shared_model: shared,
       modules,

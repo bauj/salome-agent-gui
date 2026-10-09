@@ -99,7 +99,7 @@
       <div class="section-title">Runs <span class="lock-note" id="run-lock" hidden>— locked while a conversation is open</span></div>
       <div class="toggle-row" title="Skips plan approval and the stage-failure prompt; a failed stage follows &quot;When a stage fails&quot;"><div><div class="t-label">Run without asking</div></div><span class="switch" id="set-batch"></span></div>
       <div class="row2">
-        <div class="field" title="When running without asking: stop the run, or skip a stage that still fails after its retries and go on"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
+        <div class="field" title="When running without asking: stop the run, or skip a stage that fails and go on"><label for="set-on-failure">When a stage fails</label><select id="set-on-failure"><option value="abort">Stop the run</option><option value="continue">Continue</option></select></div>
         <div class="field" title="Planner hints: geom is offered a small per-stage tool set and loads more on demand. All tools: the full geom set on every call"><label for="set-tools">Tools offered</label><select id="set-tools"><option value="hints">Planner hints</option><option value="all">All tools</option></select></div>
       </div>
       <div class="row2">
@@ -107,7 +107,6 @@
         <div class="field" title="How hard geom is pushed to measure where its shapes landed. Before finishing: check once at the end. Strict: measure after every move or boolean"><label for="set-cadence">Self-check</label><select id="set-cadence"><option value="none">Off</option><option value="final">Before finishing a stage</option><option value="strict">Strict</option></select></div>
       </div>
       <div class="row2">
-        <div class="field" title="Per stage: how many times a script that fails in SALOME goes back to the model"><label for="set-exec-retries">Retries after a failed run</label><input id="set-exec-retries" type="number" min="0" max="10" step="1"></div>
         <div class="field" title="Most model turns one stage may take (a turn can carry several tool calls)"><label for="set-cap">Tool calls per stage</label><input id="set-cap" type="number" min="1" max="60" step="1"></div>
       </div>
       <div class="field" title="How much the run logs. LLM trace also writes every prompt, response and reasoning to the run folder"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
