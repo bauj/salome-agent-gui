@@ -66,7 +66,7 @@ TOOL_SELECTION = ("hints", "all")
 VERIFY_CADENCE = ("none", "final", "strict")
 PLAN_DETAIL = ("coarse", "balanced", "fine")
 # policy int knobs: (default, min, max)
-POLICY_INTS = {"exec_retries": (2, 0, 10), "tool_iteration_cap": (12, 1, 60)}
+POLICY_INTS = {"tool_iteration_cap": (12, 1, 60)}
 # llm int knobs the Advanced fold edits: (default, min, max)
 LLM_INTS = {"reasoning_budget": (20000, 0, 200000), "vision_fix_retries": (2, 0, 5),
             "timeout": (120, 10, 1800)}
