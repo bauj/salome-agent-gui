@@ -74,7 +74,7 @@ LLM_INTS = {"reasoning_budget": (20000, 0, 200000), "vision_fix_retries": (2, 0,
 ROW_KEYS = ("model", "base_url", "api_key", "ssl_cert_file")
 # engine keys left to Edit JSON (tests/test_config_store.py checks the engine's list)
 JSON_ONLY = {"extra_headers", "extra_body", "module_extra_body", "json_retries", "max_retries",
-             "temperature", "carry_reasoning", "loop_retries"}
+             "temperature", "carry_reasoning", "loop_retries", "text_tool_calls"}
 MODULE_JSON_ONLY = {"extra_headers", "extra_body", "temperature", "timeout"}
 
 
