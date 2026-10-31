@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from PyQt5.QtGui import QFontDatabase
-from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QInputDialog, QLabel,
+from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QInputDialog, QLabel,
                              QPlainTextEdit, QVBoxLayout)
 
 
@@ -63,3 +63,9 @@ def edit_config(parent, path: Path) -> bool:
     dlg = JsonEditDialog(parent, f"Edit {path}", Path(path).read_text(),
                          lambda text: config_store.save_raw(path, text))
     return dlg.exec_() == QDialog.Accepted
+
+
+def pick_config(parent, current: Path) -> Path | None:
+    path, _ = QFileDialog.getOpenFileName(parent, "Load config", str(Path(current).parent),
+                                          "Config (*.json *.json.*);;All files (*)")
+    return Path(path) if path else None

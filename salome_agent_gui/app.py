@@ -19,10 +19,10 @@ def main(argv=None) -> int:
     from salome_agent_gui.main_window import MainWindow
 
     setup_logging(0)
-    path = config_store.ensure_user_config()
+    path, notice = config_store.startup_config(config_store.ensure_user_config())
     app = QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("SALOME Agent")
-    window = MainWindow(path)
+    window = MainWindow(path, notice=notice)
     window.show()
     return app.exec_()
 
