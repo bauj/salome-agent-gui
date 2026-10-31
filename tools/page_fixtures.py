@@ -54,6 +54,10 @@ class FakeBridge(QObject):
         self.calls.append(("editConfigJson",))
 
     @pyqtSlot()
+    def loadConfig(self):
+        self.calls.append(("loadConfig",))
+
+    @pyqtSlot()
     def reconnect(self):
         self.calls.append(("reconnect",))
 

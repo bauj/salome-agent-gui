@@ -633,6 +633,7 @@ function lockRunOptions(locked) {
   $("set-batch").classList.toggle("disabled", locked);
   $("set-shared").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
+  $("btn-load-config").disabled = locked;
   $("run-lock").hidden = !locked;
   $("model-lock").hidden = !locked;
 }
@@ -827,6 +828,7 @@ function wire() {
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-reconnect").addEventListener("click", () => bridge.reconnect());
   $("btn-edit-json").addEventListener("click", () => bridge.editConfigJson());
+  $("btn-load-config").addEventListener("click", () => bridge.loadConfig());
   $("set-reasoning").addEventListener("click", () => $("set-reasoning").classList.toggle("on"));
   $("set-shared").addEventListener("click", () => {
     if (state.locked) return;

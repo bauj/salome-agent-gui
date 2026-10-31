@@ -321,3 +321,33 @@ def test_parked_rows_show_with_active_ones_and_survive_a_save(tmp_path):
     assert s["modules"]["vision"] == _row(model="r", api_key="k2")
     cs.save_settings(p, {"shared_model": False, "modules": s["modules"]})
     assert json.loads(p.read_text())["llm"]["modules"]["vision"] == {"model": "r", "api_key": "k2"}
+
+
+def test_startup_config_without_state_uses_the_default(tmp_path):
+    default = tmp_path / "salome-agent.json"
+    assert cs.startup_config(default, tmp_path / "none.json") == (default, None)
+
+
+def test_remembered_config_is_used_at_startup(tmp_path):
+    other = tmp_path / "config_gemma.json"
+    other.write_text("{}")
+    state = tmp_path / "state" / "gui.json"
+    cs.remember_config(other, state)
+    assert cs.startup_config(tmp_path / "salome-agent.json", state) == (other.resolve(), None)
+
+
+def test_missing_remembered_config_falls_back_with_a_note(tmp_path):
+    state = tmp_path / "gui.json"
+    gone = tmp_path / "gone.json"
+    state.write_text(json.dumps({"config_path": str(gone)}))
+    default = tmp_path / "salome-agent.json"
+    path, note = cs.startup_config(default, state)
+    assert path == default and str(gone) in note and str(default) in note
+
+
+@pytest.mark.parametrize("text", ["not json", "[]", '{"config_path": 3}', '{"config_path": ""}'])
+def test_broken_state_file_uses_the_default_quietly(tmp_path, text):
+    state = tmp_path / "gui.json"
+    state.write_text(text)
+    default = tmp_path / "salome-agent.json"
+    assert cs.startup_config(default, state) == (default, None)

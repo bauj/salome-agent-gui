@@ -4,6 +4,8 @@ import tempfile
 from pathlib import Path
 
 USER_CONFIG = Path.home() / ".config" / "salome" / "salome-agent.json"
+# which config file the GUI uses; kept outside the config files it switches between
+GUI_STATE = USER_CONFIG.parent / "salome-agent-gui.json"
 KEY_FIELDS = ("base_url", "model", "api_key", "ssl_cert_file")
 
 
@@ -32,6 +34,27 @@ def ensure_user_config(path: Path | None = None, seeds: list[Path] | None = None
             _write(path, json.loads(Path(seed).read_text()))
             return path
     raise FileNotFoundError(f"no config.example.json found to seed {path}")
+
+
+def remember_config(path: Path, state: Path | None = None) -> None:
+    state = Path(state or GUI_STATE)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"config_path": str(Path(path).resolve())}))
+    os.replace(tmp, state)
+
+
+def startup_config(default: Path, state: Path | None = None) -> tuple[Path, str | None]:
+    """The last loaded config, or `default` with a note when it is gone."""
+    try:
+        last = json.loads(Path(state or GUI_STATE).read_text()).get("config_path")
+    except (OSError, ValueError, AttributeError):
+        return Path(default), None
+    if not isinstance(last, str) or not last:
+        return Path(default), None
+    if Path(last).is_file():
+        return Path(last), None
+    return Path(default), f"Last loaded config {last} not found, using {default}."
 
 
 def read_key_fields(path: Path) -> dict:
