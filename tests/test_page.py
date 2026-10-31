@@ -644,3 +644,14 @@ def test_edit_turn_keeps_thinking(qtbot, page):
     fake.emit("renderTurn", vm)
     wait_js(qtbot, view, "!!document.querySelector('.turn-reasoning details')")
     assert _body_order(qtbot, view) == "Thinking…|reasoning"
+
+
+def test_load_config_button_calls_the_bridge_and_locks(qtbot, page):
+    view, fake = page
+    fake.emit("setBusy", IDLE_NEW)                      # no conversation: run options unlocked
+    wait_js(qtbot, view, "!document.getElementById('btn-load-config').disabled")
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-load-config').click(); true")
+    qtbot.waitUntil(lambda: ("loadConfig",) in fake.calls, timeout=3000)
+    fake.emit("setBusy", IDLE_OPEN)                     # a conversation is open: locked
+    wait_js(qtbot, view, "document.getElementById('btn-load-config').disabled")

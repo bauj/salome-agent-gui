@@ -622,3 +622,53 @@ def test_header_names_the_vision_override(bridges, cfg_path):
                                "modules": {"vision": {"model": "reader"}}}))
     st = p.last("setStatus")
     assert st["label"].endswith("· vision: reader") and st["title"] == "vision: reader"
+
+
+def test_load_config_switches_reads_saves_and_remembers(bridges, cfg_path, tmp_path, gui_state):
+    other = tmp_path / "config_gemma.json"
+    other.write_text(json.dumps({**CFG, "llm": {**CFG["llm"], "model": "gemma"}}))
+    b, p = make(bridges, cfg_path, {}, pick_config=lambda parent, current: other)
+    b.loadConfig()
+    assert b.config_path == other
+    s = p.last("setSettings")
+    assert (s["model"], s["config_path"]) == ("gemma", str(other))
+    assert p.last("setStatus")["state"] == "connected"
+    assert json.loads(gui_state.read_text())["config_path"] == str(other.resolve())
+    b.saveSettings(json.dumps({"model": "qwen"}))
+    assert json.loads(other.read_text())["llm"]["model"] == "qwen"
+    assert json.loads(cfg_path.read_text())["llm"]["model"] == CFG["llm"]["model"]
+
+
+def test_load_config_refuses_a_broken_file_and_keeps_the_old_one(bridges, cfg_path, tmp_path,
+                                                                 gui_state):
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"llm": ')
+    b, p = make(bridges, cfg_path, {}, pick_config=lambda parent, current: bad)
+    b.loadConfig()
+    assert b.config_path == cfg_path
+    status = p.last("setStatus")
+    assert status["state"] == "error" and str(bad) in status["detail"]
+    assert not gui_state.exists()
+
+
+def test_load_config_cancelled_changes_nothing(bridges, cfg_path, gui_state):
+    b, p = make(bridges, cfg_path, {}, pick_config=lambda parent, current: None)
+    before = len(p.items)
+    b.loadConfig()
+    assert b.config_path == cfg_path and len(p.items) == before and not gui_state.exists()
+
+
+def test_load_config_is_refused_while_a_conversation_is_open(qtbot, bridges, cfg_path, tmp_path):
+    picked = []
+    b, p = make(bridges, cfg_path, {}, pick_config=lambda parent, current: picked.append(1))
+    first_turn(qtbot, b, p)
+    b.loadConfig()
+    assert picked == [] and b.config_path == cfg_path
+
+
+def test_note_before_the_page_is_ready_is_replayed(bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {}, ready=False)
+    b.note("Last loaded config /x.json not found")
+    b.ready()
+    items = p.last("replay")["items"]
+    assert {"type": "note", "text": "Last loaded config /x.json not found"} in items
