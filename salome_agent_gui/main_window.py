@@ -17,17 +17,21 @@ class MainWindow(QMainWindow):
     """Thin shell: the chat is a web page; the Bridge holds the state."""
 
     def __init__(self, config_path: Path, *, open_fn=None, probe_fn=None, edit_plan=None,
-                 parent_pid: int | None = None, view_factory=None, system_dark=None):
+                 parent_pid: int | None = None, view_factory=None, system_dark=None,
+                 notice: str | None = None):
         super().__init__()
         self.setWindowTitle("SALOME Agent")
         self.resize(900, 780)
         self._closing = False
         self.bridge = Bridge(config_path, open_fn=open_fn, probe_fn=probe_fn,
                              edit_plan=edit_plan or dialogs.edit_plan,
-                             edit_config=dialogs.edit_config, open_file=_open_file,
+                             edit_config=dialogs.edit_config, pick_config=dialogs.pick_config,
+                             open_file=_open_file,
                              system_dark=system_dark or self._palette_is_dark,
                              dialog_parent=self, parent=self)
         self.bridge.close_ready.connect(self._close_now)
+        if notice:
+            self.bridge.note(notice)
         self.view = (view_factory or web_view.create)(self, self.bridge)
         self.setCentralWidget(self.view)
         self.bridge.start()

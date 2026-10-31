@@ -29,7 +29,7 @@ class Bridge(QObject):
     close_ready = pyqtSignal()
 
     def __init__(self, config_path, *, open_fn=None, probe_fn=None, edit_plan=None,
-                 edit_config=None, open_file=None, icon_for=None, system_dark=None,
+                 edit_config=None, pick_config=None, open_file=None, icon_for=None, system_dark=None,
                  clock=time.time, dialog_parent=None, parent=None):
         super().__init__(parent)
         if probe_fn is None:
@@ -40,6 +40,7 @@ class Bridge(QObject):
         self._probe_fn = probe_fn
         self._edit_plan = edit_plan or (lambda parent, plan: None)
         self._edit_config = edit_config or (lambda parent, path: False)
+        self._pick_config = pick_config or (lambda parent, current: None)
         self._open_file = open_file or (lambda path: None)
         self._icon_for = icon_for or module_icons.icon_for
         self._system_dark = system_dark or (lambda: False)
@@ -110,6 +111,9 @@ class Bridge(QObject):
     def _note(self, text: str) -> None:
         self._items.append(("note", text))
         self._emit("addNote", {"text": text})
+
+    def note(self, text: str) -> None:
+        self._note(text)
 
     # ---- page lifecycle -------------------------------------------------
     @pyqtSlot()
@@ -187,6 +191,32 @@ class Bridge(QObject):
         if self._edit_config(self._dialog_parent, self.config_path):
             self._emit("setSettings", self._settings())
             self._emit("setTheme", self._theme())
+
+    @pyqtSlot()
+    def loadConfig(self) -> None:
+        """Switch to another config file; refused while a conversation is open
+        (the engine got its config when the conversation started)."""
+        if self.worker is not None:
+            return
+        path = self._pick_config(self._dialog_parent, self.config_path)
+        if not path:
+            return
+        path = Path(path)
+        try:
+            config_store.load(path)
+        except Exception as e:  # noqa: BLE001
+            self._status = {"state": "error", "label": "Config error",
+                            "detail": f"{path}: {e}"}
+            self._emit("setStatus", self._status)
+            return
+        self.config_path = path
+        try:
+            config_store.remember_config(path)
+        except OSError as e:
+            self._note(f"Could not remember {path} for the next start: {e}")
+        self._emit("setSettings", self._settings())
+        self._emit("setTheme", self._theme())
+        self.probe()
 
     # ---- conversation ---------------------------------------------------
     def _start_conversation(self) -> bool:

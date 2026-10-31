@@ -24,3 +24,13 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "web" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def gui_state(tmp_path, monkeypatch):
+    """Keep tests off the real ~/.config/salome/salome-agent-gui.json."""
+    from salome_agent_gui import config_store
+
+    path = tmp_path / "gui-state" / "salome-agent-gui.json"
+    monkeypatch.setattr(config_store, "GUI_STATE", path)
+    return path
