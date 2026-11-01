@@ -89,7 +89,7 @@ def test_view_model_shape_for_a_fresh_plan():
             {"index": 1, "module": "smesh", "icon": None, "intent": "mesh", "status": "pending",
              "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": [],
              "reasoning": []}],
-        "edits": [], "gate": None, "status": "running", "message": "", "objects": [],
+        "edits": [], "gate": None, "status": "running", "message": "", "warnings": [], "objects": [],
         "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {},
         "vision": None}
 
@@ -337,3 +337,14 @@ def test_vision_reasoning_goes_to_the_card_not_the_turn():
     vm = v.to_view_model(0)
     assert vm["vision"]["reasoning"] == [{"call": 1, "reasoning": "80 mm", "prose": ""}]
     assert "vision" not in vm["reasoning"]
+
+
+def test_turn_done_warnings_reach_the_view_model():
+    v = RunView()
+    v.apply(ev("turn_start", turn=0, text="mesh it at 2 mm"))
+    v.apply(ev("turn_done", turn=0, status="ok", message="meshed",
+               warnings=["stage 1/1 (smesh): \"pas de 2 mm\": kept"]))
+    assert v.to_view_model(0)["warnings"] == ["stage 1/1 (smesh): \"pas de 2 mm\": kept"]
+    v2 = RunView()
+    v2.apply(ev("turn_done", turn=0, status="ok", message="done"))
+    assert v2.to_view_model(0)["warnings"] == []
