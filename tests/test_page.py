@@ -157,6 +157,19 @@ def test_result_shows_objects_file_chips_and_usage(qtbot, page):
     qtbot.waitUntil(lambda: ("openFile", "/tmp/run/result.py") in fake.calls, timeout=3000)
 
 
+def test_result_lists_each_warning_under_the_result_line(qtbot, page):
+    view, fake = page
+    fake.emit("renderTurn", dict(DONE_VM, warnings=["stage 4/4 (smesh): kept 2 mm",
+                                                    "stage 4/4 (smesh) missed a check: 4.10% off"]))
+    wait_js(qtbot, view, "!!document.querySelector('.result')")
+    assert run_js(qtbot, view, "[...document.querySelectorAll('.result-warning')]"
+                               ".map(e => e.textContent).join('|')") == \
+        "stage 4/4 (smesh): kept 2 mm|stage 4/4 (smesh) missed a check: 4.10% off"
+    fake.emit("renderTurn", DONE_VM)
+    wait_js(qtbot, view, "!!document.querySelector('.result')")
+    assert run_js(qtbot, view, "document.querySelectorAll('.result-warning').length") == 0
+
+
 def test_edits_card_lists_changes(qtbot, page):
     view, fake = page
     fake.emit("renderTurn", EDIT_VM)

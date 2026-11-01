@@ -353,6 +353,12 @@ function resultBlock(vm) {
   }
   r.appendChild(line);
   if (msg && block && vm.status !== "ok") r.appendChild(el("div", "err", msg));
+  for (const w of vm.warnings || []) {
+    const row = el("div", "result-warning");
+    svg(row.appendChild(el("span", "res-ic")), "warn");
+    row.appendChild(el("span", null, w));
+    r.appendChild(row);
+  }
   const underSteps = new Set();
   for (const st of vm.stages) for (const name of st.objects || []) underSteps.add(name);
   if (vm.objects.length && !vm.objects.every((name) => underSteps.has(name))) {

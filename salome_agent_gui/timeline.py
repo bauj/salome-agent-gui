@@ -39,6 +39,8 @@ class RunView:
     edits: list[str] = field(default_factory=list)
     turn_status: str | None = None
     turn_message: str | None = None
+    # results that depart from the request or miss a check (engine turn_done)
+    warnings: list[str] = field(default_factory=list)
     gate_id: int | None = None
     edit_ops: list[dict] = field(default_factory=list)
     # "planner" / "stage:<i>" / "edit" -> [{"call", "reasoning", "prose"}]
@@ -102,6 +104,7 @@ class RunView:
             self.edit_ops.append({"op": "replay", "nodes": nodes})
         elif kind == "turn_done":
             self.turn_status, self.turn_message = d.get("status"), d.get("message")
+            self.warnings = [str(w) for w in d.get("warnings") or []]
             if d.get("usage"):                  # totals so far, cancelled turns included
                 self.usage = dict(d["usage"])
             self.finished = True
@@ -209,6 +212,7 @@ class RunView:
             "gate": self._gate_view(),
             "status": self.status(),
             "message": self.turn_message or self.fatal or "",
+            "warnings": list(self.warnings),
             "objects": [short_name(n) for n in self.objects],
             "files": {"result_py": self.result_py, "report_md": self.report_md},
             "usage": self.turn_usage(),
