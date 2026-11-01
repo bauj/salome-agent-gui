@@ -1,10 +1,12 @@
+import base64
 import json
 import os
 import tempfile
 from pathlib import Path
 
 USER_CONFIG = Path.home() / ".config" / "salome" / "salome-agent.json"
-# which config file the GUI uses; kept outside the config files it switches between
+# which config file the GUI uses and the chat window geometry; kept outside the config
+# files it switches between
 GUI_STATE = USER_CONFIG.parent / "salome-agent-gui.json"
 KEY_FIELDS = ("base_url", "model", "api_key", "ssl_cert_file")
 
@@ -36,12 +38,43 @@ def ensure_user_config(path: Path | None = None, seeds: list[Path] | None = None
     raise FileNotFoundError(f"no config.example.json found to seed {path}")
 
 
-def remember_config(path: Path, state: Path | None = None) -> None:
+def _read_state(state: Path) -> dict:
+    try:
+        data = json.loads(state.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _update_state(updates: dict, state: Path | None = None) -> None:
+    """Merge `updates` into the GUI state file, keeping its other keys."""
     state = Path(state or GUI_STATE)
+    data = _read_state(state)
+    data.update(updates)
     state.parent.mkdir(parents=True, exist_ok=True)
     tmp = state.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"config_path": str(Path(path).resolve())}))
+    tmp.write_text(json.dumps(data))
     os.replace(tmp, state)
+
+
+def remember_config(path: Path, state: Path | None = None) -> None:
+    _update_state({"config_path": str(Path(path).resolve())}, state)
+
+
+def window_geometry(state: Path | None = None) -> bytes | None:
+    """The chat window geometry saved at the last close (Qt saveGeometry), or None."""
+    value = _read_state(Path(state or GUI_STATE)).get("window_geometry")
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except ValueError:
+        return None
+
+
+def save_window_geometry(geometry: bytes, state: Path | None = None) -> None:
+    _update_state({"window_geometry": base64.b64encode(bytes(geometry)).decode("ascii")},
+                  state)
 
 
 def startup_config(default: Path, state: Path | None = None) -> tuple[Path, str | None]:
