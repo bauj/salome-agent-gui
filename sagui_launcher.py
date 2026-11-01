@@ -17,7 +17,7 @@ def clean_env(environ) -> dict:
 
 
 def pid_path() -> Path:
-    return Path.home() / ".salome_agent" / "salome-agent-gui.pid"
+    return Path.home() / ".local" / "share" / "salome-agent" / "salome-agent-gui.pid"
 
 
 def window_alive(path: Path) -> bool:
@@ -75,7 +75,7 @@ def launch_window(launcher: str, path: Path, environ=None, popen=subprocess.Pope
     except ImportError:
         pid_start = None
     path = Path(path)
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"pid": proc.pid, "pid_start": pid_start}))
     return proc.pid
 

@@ -30,9 +30,9 @@ def test_window_alive_rejects_a_recycled_pid(tmp_path):
     assert not sl.window_alive(p)
 
 
-def test_pid_path_lives_under_salome_agent_home_dir():
+def test_pid_path_lives_in_the_salome_agent_data_dir():
     from pathlib import Path
-    assert sl.pid_path() == Path.home() / ".salome_agent" / "salome-agent-gui.pid"
+    assert sl.pid_path() == Path.home() / ".local" / "share" / "salome-agent" / "salome-agent-gui.pid"
 
 
 def test_ensure_server_reuses_a_running_server():
