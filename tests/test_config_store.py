@@ -351,3 +351,28 @@ def test_broken_state_file_uses_the_default_quietly(tmp_path, text):
     state.write_text(text)
     default = tmp_path / "salome-agent.json"
     assert cs.startup_config(default, state) == (default, None)
+
+
+def test_window_geometry_round_trip_keeps_the_remembered_config(tmp_path):
+    other = tmp_path / "config_gemma.json"
+    other.write_text("{}")
+    state = tmp_path / "gui.json"
+    cs.remember_config(other, state)
+    cs.save_window_geometry(b"\x01\xd9\xd0\xcb", state)
+    assert cs.window_geometry(state) == b"\x01\xd9\xd0\xcb"
+    assert cs.startup_config(tmp_path / "salome-agent.json", state) == (other.resolve(), None)
+
+
+def test_remember_config_keeps_the_saved_geometry(tmp_path):
+    state = tmp_path / "gui.json"
+    cs.save_window_geometry(b"geo", state)
+    cs.remember_config(tmp_path / "x.json", state)
+    assert cs.window_geometry(state) == b"geo"
+
+
+@pytest.mark.parametrize("text", ["not json", "[]", '{"window_geometry": 3}',
+                                  '{"window_geometry": "%%%"}'])
+def test_broken_window_geometry_reads_as_none(tmp_path, text):
+    state = tmp_path / "gui.json"
+    state.write_text(text)
+    assert cs.window_geometry(state) is None

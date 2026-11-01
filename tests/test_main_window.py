@@ -101,3 +101,25 @@ def test_palette_decides_whether_the_system_theme_is_dark(qtbot, cfg_path):
     pal.setColor(QPalette.Window, QColor(240, 240, 240))
     w.setPalette(pal)
     assert w._palette_is_dark() is False
+
+
+def test_window_opens_at_the_size_it_was_closed_at(qtbot, cfg_path, gui_state):
+    w, _ = make(qtbot, cfg_path, {})
+    w.show()
+    w.resize(640, 500)
+    w.close()
+    assert json.loads(gui_state.read_text())["window_geometry"]
+    again, _ = make(qtbot, cfg_path, {})
+    assert (again.width(), again.height()) == (640, 500)
+
+
+def test_window_opens_at_the_default_size_without_a_saved_one(qtbot, cfg_path):
+    w, _ = make(qtbot, cfg_path, {})
+    assert (w.width(), w.height()) == (900, 780)
+
+
+def test_window_ignores_an_unreadable_saved_geometry(qtbot, cfg_path, gui_state):
+    gui_state.parent.mkdir(parents=True, exist_ok=True)
+    gui_state.write_text(json.dumps({"window_geometry": "not base64!"}))
+    w, _ = make(qtbot, cfg_path, {})
+    assert (w.width(), w.height()) == (900, 780)

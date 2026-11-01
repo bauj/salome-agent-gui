@@ -5,7 +5,7 @@ from PyQt5.QtCore import QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices, QPalette
 from PyQt5.QtWidgets import QMainWindow
 
-from salome_agent_gui import dialogs, web_view
+from salome_agent_gui import config_store, dialogs, web_view
 from salome_agent_gui.bridge import Bridge
 
 
@@ -22,6 +22,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("SALOME Agent")
         self.resize(900, 780)
+        geometry = config_store.window_geometry()
+        if geometry:
+            self.restoreGeometry(geometry)
         self._closing = False
         self.bridge = Bridge(config_path, open_fn=open_fn, probe_fn=probe_fn,
                              edit_plan=edit_plan or dialogs.edit_plan,
@@ -70,6 +73,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         if self._closing or self.bridge.request_close():
+            try:
+                config_store.save_window_geometry(bytes(self.saveGeometry()))
+            except OSError:
+                pass
             super().closeEvent(e)
             return
         e.ignore()
