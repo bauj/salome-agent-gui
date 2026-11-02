@@ -275,7 +275,19 @@ function stagesCard(vm) {
   return card;
 }
 
-function editsCard(edits) {
+function turnClock(vm) {
+  const meta = el("span", "meta");
+  if (vm.status === "running" && vm.started_at) {
+    meta.dataset.start = vm.started_at;
+    meta.textContent = fmtClock(Date.now() / 1000 - vm.started_at);
+  } else if (vm.elapsed_s !== null && vm.elapsed_s !== undefined) {
+    meta.textContent = `done in ${fmtDuration(vm.elapsed_s)}`;
+  }
+  return meta;
+}
+
+function editsCard(vm) {
+  const edits = vm.edits;
   const card = el("div", "card");
   const head = el("div", "card-head");
   const changes = edits.filter((e) => e.op !== "replay");
@@ -284,6 +296,10 @@ function editsCard(edits) {
   let count = `· ${plural(changes.length, "edit")}`;
   if (replay) count += `, ${plural(replay.nodes.length, "object")} rebuilt`;
   head.appendChild(el("span", "count", count));
+  if (!vm.stages.length) {
+    head.appendChild(el("span", "spacer"));
+    head.appendChild(turnClock(vm));
+  }
   card.appendChild(head);
   const ul = el("ul", "edits");
   for (const e of changes) {
@@ -472,7 +488,10 @@ function turnNode(vm) {
   if (!vm.stages.length && !vm.edits.length && !gate && vm.status === "running"
       && !(vm.vision && vm.vision.status === "running")) {
     const planning = vm.reasoning && vm.reasoning.planner;
-    body.appendChild(el("div", "agent-text muted", planning ? "Planning…" : "Thinking…"));
+    const wait = el("div", "agent-text muted", planning ? "Planning…" : "Thinking…");
+    const clock = turnClock(vm);
+    if (clock.textContent) wait.appendChild(clock);
+    body.appendChild(wait);
   }
   body.appendChild(turnReasoning);
   if (gate && gate.kind === "plan") {
@@ -482,7 +501,7 @@ function turnNode(vm) {
   }
   if (vm.stages.length) body.appendChild(stagesCard(vm));
   else if (gate && gate.kind === "plan") body.appendChild(planFoot(gate));   // never leave no way out
-  if (vm.edits.length) body.appendChild(editsCard(vm.edits));
+  if (vm.edits.length) body.appendChild(editsCard(vm));
   if (gate && gate.kind === "stage_failed") body.appendChild(failCard(vm, gate));
   if (!gate && vm.status !== "running") body.appendChild(resultBlock(vm));
   return wrap;

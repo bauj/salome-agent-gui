@@ -156,6 +156,8 @@ button { font: inherit; }
 }
 .card-head svg { width: 16px; height: 16px; flex: none; }
 .card-head .count { color: var(--text-3); font-weight: 500; }
+.card-head .meta { color: var(--text-3); font-size: 12px; font-weight: 500; }
+.agent-text .meta { margin-left: 8px; color: var(--text-3); font-size: 12px; }
 .card-foot {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2);

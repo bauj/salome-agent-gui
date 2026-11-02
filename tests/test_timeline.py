@@ -89,7 +89,8 @@ def test_view_model_shape_for_a_fresh_plan():
             {"index": 1, "module": "smesh", "icon": None, "intent": "mesh", "status": "pending",
              "attempts": 0, "started_at": None, "elapsed_s": None, "error": None, "objects": [],
              "reasoning": []}],
-        "edits": [], "gate": None, "status": "running", "message": "", "warnings": [], "objects": [],
+        "edits": [], "gate": None, "status": "running", "started_at": None, "elapsed_s": None,
+        "message": "", "warnings": [], "objects": [],
         "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {},
         "vision": None}
 
@@ -348,3 +349,24 @@ def test_turn_done_warnings_reach_the_view_model():
     v2 = RunView()
     v2.apply(ev("turn_done", turn=0, status="ok", message="done"))
     assert v2.to_view_model(0)["warnings"] == []
+
+
+def test_turn_clock_runs_from_send_to_turn_done():
+    t = [100.0]
+    v = RunView(clock=lambda: t[0], started_at=100.0)
+    v.apply(ev("graph_edit", op="edit", node="n2", param="dz", old=40, new=60))
+    assert v.to_view_model(1)["started_at"] == 100.0
+    t[0] = 112.34
+    v.apply(ev("turn_done", turn=1, status="ok", message="done"))
+    vm = v.to_view_model(1)
+    assert vm["started_at"] is None and vm["elapsed_s"] == 12.3
+
+
+def test_stop_keeps_the_turn_time():
+    t = [50.0]
+    v = RunView(clock=lambda: t[0], started_at=50.0)
+    t[0] = 54.0
+    v.apply(ev("aborted"))
+    t[0] = 60.0
+    v.apply(ev("turn_done", turn=0, status="failed", message="turn cancelled"))
+    assert v.to_view_model(0)["elapsed_s"] == 4.0

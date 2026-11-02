@@ -54,6 +54,9 @@ class RunView:
     # stage's clock starts when the engine moved on to it: plan approved (or
     # the plan itself in batch mode, which has no gate) or previous stage over.
     _next_start: float | None = field(default=None, repr=False)
+    # wall clock of the whole turn: the bridge sets the start when it sends it
+    started_at: float | None = None
+    elapsed_s: float | None = None
 
     def mark_resumed(self) -> None:
         self._next_start = self.clock()
@@ -108,6 +111,7 @@ class RunView:
             if d.get("usage"):                  # totals so far, cancelled turns included
                 self.usage = dict(d["usage"])
             self.finished = True
+            self._stop_clock()
         elif kind == "reasoning":
             calls = self.reasoning.setdefault(reasoning_key(d), [])
             if not calls or calls[-1]["call"] != d.get("call"):
@@ -135,6 +139,11 @@ class RunView:
             self.aborted = True
             self.finished = True
             self._end_vision("stopped")
+            self._stop_clock()
+
+    def _stop_clock(self) -> None:
+        if self.started_at is not None and self.elapsed_s is None:
+            self.elapsed_s = round(self.clock() - self.started_at, 1)
 
     def _end_vision(self, status: str, error=None) -> None:
         if self.vision and self.vision["status"] == "running":
@@ -211,6 +220,8 @@ class RunView:
             "edits": [dict(e) for e in self.edit_ops],
             "gate": self._gate_view(),
             "status": self.status(),
+            "started_at": self.started_at if self.status() == "running" else None,
+            "elapsed_s": self.elapsed_s,
             "message": self.turn_message or self.fatal or "",
             "warnings": list(self.warnings),
             "objects": [short_name(n) for n in self.objects],
