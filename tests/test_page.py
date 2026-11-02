@@ -637,7 +637,7 @@ def _body_order(qtbot, view):
                                ".filter(n => n.children.length || n.textContent.trim())"
                                ".map(n => n.classList.contains('vision-card') ? 'vision'"
                                " : n.classList.contains('turn-reasoning') ? 'reasoning'"
-                               " : n.textContent.trim()).join('|')")
+                               " : n.firstChild.textContent.trim()).join('|')")
 
 
 def test_planning_placeholder_sits_under_the_card_with_its_reasoning_below(qtbot, page):
@@ -668,3 +668,18 @@ def test_load_config_button_calls_the_bridge_and_locks(qtbot, page):
     qtbot.waitUntil(lambda: ("loadConfig",) in fake.calls, timeout=3000)
     fake.emit("setBusy", IDLE_OPEN)                     # a conversation is open: locked
     wait_js(qtbot, view, "document.getElementById('btn-load-config').disabled")
+
+
+def test_chat_edit_turn_runs_with_a_clock_then_shows_its_time(qtbot, page):
+    view, fake = page
+    vm = dict(EDIT_VM, id=5, status="running", edits=[], started_at=time.time() - 7)
+    fake.emit("renderTurn", vm)
+    wait_js(qtbot, view, "!!document.querySelector('.agent-text [data-start]')")
+    assert _body_order(qtbot, view).startswith("Thinking…")
+    fake.emit("renderTurn", dict(vm, edits=EDIT_VM["edits"]))
+    wait_js(qtbot, view, "!!document.querySelector('.card-head [data-start]')")
+    fake.emit("renderTurn", dict(EDIT_VM, id=5, started_at=None, elapsed_s=12.4))
+    wait_js(qtbot, view, "!!document.querySelector('.result')")
+    head = run_js(qtbot, view, "document.querySelector('.card-head').textContent")
+    assert "done in" in head
+    assert run_js(qtbot, view, "!!document.querySelector('[data-start]')") is False

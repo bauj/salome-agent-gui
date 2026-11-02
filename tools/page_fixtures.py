@@ -216,6 +216,10 @@ STATES = {
                               ("renderTurn", "vision-running")],
     "vision-conflicts": BASE + [("setBusy", BUSY), ("addUser", "sketch-message"),
                                 ("renderTurn", VISION_CONFLICTS_VM)],
+    "edit-running": BASE + [("setBusy", BUSY), ("addUser", {"text": "make the wheels bigger"}),
+                            ("renderTurn", "edit-running")],
+    "edit-done": BASE + [("setBusy", IDLE_OPEN), ("addUser", {"text": "make the wheels bigger"}),
+                         ("renderTurn", dict(EDIT_VM, elapsed_s=14.2))],
     "images": BASE + [("setBusy", IDLE_OPEN), ("addUser", "sketch-message"),
                       ("renderTurn", DONE_VM), ("__js__", "attach-sketches")],
 }
@@ -228,6 +232,8 @@ def resolve(payload):
         return running_vm()
     if payload == "vision-running":
         return vision_running_vm()
+    if payload == "edit-running":
+        return dict(EDIT_VM, status="running", edits=[], started_at=time.time() - 9)
     if payload == "sketch-message":
         return {"text": "A bracket like this sketch, 5 mm thick",
                 "images": [sketch_uri("bracket")]}

@@ -403,7 +403,7 @@ def test_edit_config_json_pushes_the_new_settings(bridges, cfg_path):
 
 
 def test_stage_icons_and_times_come_from_the_injected_lookups(qtbot, bridges, cfg_path):
-    ticks = itertools.chain([100.0, 112.5], itertools.repeat(200.0))
+    ticks = itertools.chain([90.0, 100.0, 112.5], itertools.repeat(200.0))
     b, p = make(bridges, cfg_path, {}, icon_for=lambda m: f"file:///icons/{m}.png",
                 clock=lambda: next(ticks))
     first_turn(qtbot, b, p)

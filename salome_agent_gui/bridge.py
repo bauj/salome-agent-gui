@@ -265,7 +265,7 @@ class Bridge(QObject):
         turn_id = self._next_turn
         self._next_turn += 1
         self._turns[turn_id] = RunView(clock=self._clock, usage_base=self._usage_base,
-                                         batch=self._batch)
+                                         batch=self._batch, started_at=self._clock())
         self._items.append(("turn", turn_id))
         self._current = turn_id
         self._render()
