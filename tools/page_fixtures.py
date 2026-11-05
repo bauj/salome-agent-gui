@@ -1,3 +1,5 @@
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 """Fixture view models and a stand-in bridge for the chat page: used by the
 page tests and by tools/render_states.py."""
 import json

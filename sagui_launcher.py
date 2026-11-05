@@ -1,3 +1,5 @@
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 """SALOME-side half of the SALOME Agent plugin: start/reuse the in-GUI agent
 server and spawn the chat window (its own venv) once."""
 import json

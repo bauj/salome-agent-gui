@@ -1,3 +1,5 @@
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 """Render the chat page's fixture states to PNG, light and dark, for review
 without SALOME. Needs a display:
     QT_QPA_PLATFORM=xcb .venv/bin/python tools/render_states.py OUTDIR"""

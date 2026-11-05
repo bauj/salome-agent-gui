@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 if [ -z "${SALOME_AGENT_GUI_ROOT_DIR}" ]; then
     export SALOME_AGENT_GUI_ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fi

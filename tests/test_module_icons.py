@@ -1,3 +1,5 @@
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 from salome_agent_gui.module_icons import icon_for
 
 PNG = b"\x89PNG\r\n\x1a\n"

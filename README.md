@@ -130,3 +130,7 @@ The page tests (marker `web`) need Qt WebEngine and a real display; with
 
 The `salome-agent` submodule pins the engine; after bumping it, check that
 `git ls-tree HEAD salome-agent` shows the intended engine commit.
+
+## License
+
+GNU Lesser General Public License, version 2.1 or later: see `COPYING`.
