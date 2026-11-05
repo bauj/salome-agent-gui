@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "salome-agent-gui"
 version = "0.1.0"
 requires-python = ">=3.10"
+license = {text = "LGPL-2.1-or-later"}
 dependencies = ["salome-agent", "PyQt5", "PyQt5-Qt5==5.15.19", "PyQtWebEngine==5.15.7",
                 "PyQtWebEngine-Qt5==5.15.19"]
 

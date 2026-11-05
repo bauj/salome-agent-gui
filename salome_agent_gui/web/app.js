@@ -1,3 +1,4 @@
+// Copyright (C) 2026  salome-agent authors, LGPL 2.1 or later
 "use strict";
 
 // Constant SVG markup only. Everything that comes from the engine or the LLM is

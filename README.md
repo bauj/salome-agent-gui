@@ -6,29 +6,71 @@
 **Chat with SALOME and watch your model take shape!** Describe what you want in plain words, or
 drop in a picture of it, and [salome-agent](salome-agent/) builds it for you, right inside SALOME.
 
-[![Présentation de SALOME Agent (video, in French)](https://img.youtube.com/vi/iFKYA-E-_0o/hqdefault.jpg)](https://www.youtube.com/watch?v=iFKYA-E-_0o&t=31s)
-
-*Click to watch the presentation on YouTube (in French).*
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=iFKYA-E-_0o&t=31s">
+    <img src="https://img.youtube.com/vi/iFKYA-E-_0o/hqdefault.jpg" alt="Présentation de SALOME Agent (video, in French)">
+  </a>
+  <br>
+  <em>Click to watch the presentation on YouTube (in French).</em>
+</p>
 
 To get going, open **Tools > Plugins > SALOME Agent**: this starts the agent server inside the
 SALOME GUI and opens the chat. Your first message builds a model (plan -> stages -> `result.py`),
 and follow-up messages change it. The objects appear in the Object Browser and the 3D viewer as
 they are built, prefixed `sa_<run_id>_`, and you keep a script that rebuilds it all.
 
+## What it can do
+
+<p align="center">
+  <img src="docs/salome-agent-gui.png" alt="SALOME with a meshed plate in the 3D viewer, next to the SALOME Agent chat window">
+  <br>
+  <em>A plate built in SHAPER and meshed in SMESH, then changed with a follow-up message in the chat.</em>
+</p>
+
+SALOME covers the whole simulation workflow; the agent handles **geometry and meshing** today.
+It works through three SALOME modules, using each one's own tools:
+
+| Module | Used for | What the agent can do |
+|---|---|---|
+| **SHAPER** (default for geometry) | Parametric CAD | Constrained sketches; extrude, revolve, pipe, loft, filling; primitives; fuse, cut, common, partition, split; fillets and chamfers; moves, mirrors, patterns and alignment; groups |
+| **GEOM** (when you ask for it by name) | CAD | Primitives, wires and faces; prism, revolution, pipe, thick solids, filling; booleans; fillets and chamfers; moves, mirrors, patterns and alignment |
+| **SMESH** | Meshing | Tetrahedra, triangles, structured and body-fitted hexahedra, prisms; local sizes, viscous layers; groups from geometry; quality checks, quadratic elements; export to MED, UNV, STL (faces only) or CGNS |
+
+A single request can cross modules, for example build a part in SHAPER and then mesh it in SMESH.
+
+**From a request to a model**
+
+- **Describe it in words or pictures.** Attach drawings, sketches or photos (up to 10 images); this
+  needs a vision-capable model.
+- **Review the plan first.** The agent splits the job into stages and waits for your approval,
+  or runs straight through in batch mode.
+- **Each stage is checked as it goes.** The agent measures what it built, and a stage that fails
+  stops and lets you give a hint, skip it or abort.
+- **Keep talking to refine it.** "Make the roof taller" changes only that object and what depends
+  on it, keeping the same names. Undo, redo and rebuild are one click away.
+
+**What you get**
+
+- The objects, live in your study: the Object Browser and the 3D viewer update as they are built.
+- `result.py`, a standalone script that rebuilds everything in SALOME without the agent.
+- `report.md`, a record of the run.
+
+**Bring your own model.** It works with any OpenAI-compatible endpoint, local or hosted, and you
+can choose a different model per module.
+
+**Not there yet:** the agent does not set up or run solvers, or post-process results. Always
+check what it builds: quality depends on the model you use, especially when reading images.
+
 ## Chat window
 
-- **Images:** attach reference pictures with the paperclip, drag and drop, or paste. A
-  *Reading image* card shows the vision step live above the plan.
-- **Plan and stage gates:** unless batch mode is on, the *Proposed plan* waits for you
-  (*Approve & build*, *Edit plan*, or abort). A failed stage offers *Give a hint*,
-  *Skip stage* or *Abort run*.
+- **Images:** use the paperclip, drag and drop, or paste. A *Reading image* card shows the vision
+  step live above the plan.
+- **Plan:** *Approve & build* or *Edit plan* before anything is built.
 - **Reasoning:** a settings switch shows the model's reasoning live under each stage and turn.
 - **Stop** ends the turn in progress; the run still writes its `report.md`.
-- **Result line:** each turn ends with a summary line and, when the engine reports any, its
-  warnings under it: a value the user gave kept against a check (`request_conflict`), or a
-  stage accepted while missing a check.
-- **History:** undo, redo, rebuild (replays the whole study from the model when it went out
-  of sync) and *New conversation*.
+- **Result line:** each turn ends with a summary and any warnings: a value you gave kept against
+  a check (`request_conflict`), or a stage accepted while missing a check.
+- **Rebuild** replays the whole study from the model when it went out of sync.
 
 ## Settings
 
@@ -130,3 +172,7 @@ The page tests (marker `web`) need Qt WebEngine and a real display; with
 
 The `salome-agent` submodule pins the engine; after bumping it, check that
 `git ls-tree HEAD salome-agent` shows the intended engine commit.
+
+## License
+
+GNU Lesser General Public License, version 2.1 or later: see `COPYING`.

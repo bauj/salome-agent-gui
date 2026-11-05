@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (C) 2026  salome-agent authors
+# LGPL 2.1 or later
 # Installs salome-agent-gui for an existing SALOME, without SAT.
 # Usage: ./install.sh <SALOME directory> [install directory]
 # Set PYTHON to choose the Python 3.10+ that runs the chat window.
