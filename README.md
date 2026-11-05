@@ -1,11 +1,19 @@
 # salome-agent-gui
 
-SALOME GUI plugin + chat window for [salome-agent](salome-agent/).
+> **Not part of SALOME yet.** For now this plugin is installed separately (see [Install](#install)).
+> It will probably ship directly in the next SALOME version.
 
-**Tools > Plugins > SALOME Agent** starts the agent server inside the SALOME GUI and opens the
-chat, a web page drawn in Qt WebEngine. The first message builds a model (plan -> stages ->
-`result.py`); follow-up messages change it. The objects appear in the Object Browser and the 3D
-viewer as they are built, prefixed `sa_<run_id>_`.
+**Chat with SALOME and watch your model take shape!** Describe what you want in plain words, or
+drop in a picture of it, and [salome-agent](salome-agent/) builds it for you, right inside SALOME.
+
+[![Présentation de SALOME Agent (video, in French)](https://img.youtube.com/vi/iFKYA-E-_0o/hqdefault.jpg)](https://www.youtube.com/watch?v=iFKYA-E-_0o&t=31s)
+
+*Click to watch the presentation on YouTube (in French).*
+
+To get going, open **Tools > Plugins > SALOME Agent**: this starts the agent server inside the
+SALOME GUI and opens the chat. Your first message builds a model (plan -> stages -> `result.py`),
+and follow-up messages change it. The objects appear in the Object Browser and the 3D viewer as
+they are built, prefixed `sa_<run_id>_`, and you keep a script that rebuilds it all.
 
 ## Chat window
 
@@ -33,10 +41,81 @@ choice is remembered for the next start in `~/.config/salome/salome-agent-gui.js
 
 ## Install
 
-Installed by SAT (product `salome_agent_gui`), which pins its Python dependencies with
-`constraints.txt`. To pick up a pushed change: `git pull` and `git submodule update --init`
-in the application's `SOURCES/salome_agent_gui`, then
-`sat compile <application> -p salome_agent_gui --force` with SALOME closed, and restart SALOME.
+Two ways, both tested on the SALOME 9.16.0 Fedora 44 package. You need a SALOME that runs on
+Python 3.10 or newer, internet access for GitHub and PyPI, and an OpenAI-compatible LLM endpoint.
+Python dependencies are pinned by `constraints.txt`.
+
+Either way, the install takes about 500 MB, most of it Qt and Chromium: the chat window is a
+web page drawn in Qt WebEngine, and SALOME does not provide WebEngine, so a full copy is embedded.
+
+### With the install script
+
+Use this if you have already unpacked a SALOME package and do not want to use SAT. You also
+need a Python 3.10+ on your system to run the chat window; set `PYTHON` to use a specific one.
+
+**1. Find your SALOME directory.** It is the directory you unpacked the SALOME package into,
+the one holding the `salome` launcher you normally start SALOME with:
+
+```
+~/SALOME-9.16.0-native-FD44-SRC/
+├── salome
+├── env_launch.sh
+├── BINARIES-FD44/
+└── ...
+```
+
+**2. Install**, giving that directory:
+
+```bash
+git clone --recursive https://github.com/bauj/salome-agent-gui.git
+cd salome-agent-gui
+./install.sh ~/SALOME-9.16.0-native-FD44-SRC
+```
+
+Everything goes in `~/.local/share/salome-agent-gui` (give another directory as a second
+argument). Nothing is written in your SALOME directory.
+
+**3. Start SALOME through the launcher the install created:**
+
+```bash
+~/.local/share/salome-agent-gui/salome-with-agent
+```
+
+Use this launcher every time: your usual `salome` still works, but does not show the plugin.
+
+To update: `git pull`, `git submodule update --init`, then run `install.sh` again.
+To uninstall: delete `~/.local/share/salome-agent-gui`.
+
+### With SAT
+
+For a package that includes SAT (`-SRC` in its name). This adds `salome_agent_gui` to the
+package as a product, using the [sat_salome fork](https://github.com/bauj/sat_salome/tree/feat/salome-agent-gui).
+
+```bash
+tar xf SALOME-9.16.0-native-FD44-SRC.tar.gz
+mv SALOME-9.16.0-native-FD44-SRC SALOME-9.16.0-native-FD44   # SAT expects <application>-<distribution>
+(cd SALOME-9.16.0-native-FD44 && ./install_bin.sh)
+
+git clone -b feat/salome-agent-gui https://github.com/bauj/sat_salome.git SAT_SALOME
+cp -r SALOME-9.16.0-native-FD44/sat SAT
+SAT/sat init --reset_projects
+SAT/sat init --add_project "$PWD/SAT_SALOME/salome.pyconf"
+
+SAT/sat prepare SALOME-9.16.0-native -p salome_agent_gui
+SAT/sat compile SALOME-9.16.0-native -p salome_agent_gui
+SAT/sat launcher SALOME-9.16.0-native
+SAT/sat environ SALOME-9.16.0-native
+SALOME-9.16.0-native-FD44/salome
+```
+
+To pick up a pushed change: `git pull` and `git submodule update --init` in the application's
+`SOURCES/salome_agent_gui`, then `sat compile <application> -p salome_agent_gui --force` with
+SALOME closed, and restart SALOME.
+
+### First start
+
+Open **Tools > Plugins > SALOME Agent**, then set the endpoint, API key and model under the
+gear icon in the chat window.
 
 ## Development
 
