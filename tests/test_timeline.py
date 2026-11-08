@@ -94,7 +94,7 @@ def test_view_model_shape_for_a_fresh_plan():
         "edits": [], "gate": None, "status": "running", "started_at": None, "elapsed_s": None,
         "message": "", "warnings": [], "objects": [],
         "files": {"result_py": None, "report_md": None}, "usage": None, "reasoning": {},
-        "vision": None}
+        "vision": None, "rag": None}
 
 
 def test_view_model_icons_come_from_the_lookup():

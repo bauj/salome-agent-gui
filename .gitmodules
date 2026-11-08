@@ -1,3 +1,6 @@
 [submodule "salome-agent"]
 	path = salome-agent
 	url = https://github.com/bauj/salome-agent.git
+[submodule "raglib"]
+	path = raglib
+	url = https://github.com/bauj/rag_and_chatbot.git

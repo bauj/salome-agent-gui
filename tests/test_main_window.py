@@ -125,3 +125,37 @@ def test_window_ignores_an_unreadable_saved_geometry(qtbot, cfg_path, gui_state)
     gui_state.write_text(json.dumps({"window_geometry": "not base64!"}))
     w, _ = make(qtbot, cfg_path, {})
     assert (w.width(), w.height()) == (900, 780)
+
+
+# ---- requests from the SALOME menu (sagui_launcher.request_family) -------------
+def test_a_menu_request_moves_the_window_to_the_family(qtbot, cfg_path, tmp_path):
+    import sagui_launcher
+
+    from salome_agent_gui import main_window
+
+    req = tmp_path / "req.json"
+    w, made = make(qtbot, cfg_path, {}, family="agent", request_file=req)
+    assert made["bridge"].family == "agent"
+    sagui_launcher.request_family("rag", req)
+    w._check_request()
+    assert made["bridge"].family == "rag" and not req.exists()
+    assert main_window.take_request(req) is None
+    sagui_launcher.request_family("", req)              # only raises the window
+    assert main_window.take_request(req) == ""
+
+
+def test_a_request_left_before_the_window_opened_is_dropped(qtbot, cfg_path, tmp_path):
+    import sagui_launcher
+
+    req = tmp_path / "req.json"
+    sagui_launcher.request_family("rag", req)
+    w, made = make(qtbot, cfg_path, {}, family="agent", request_file=req)
+    assert not req.exists() and made["bridge"].family == "agent"
+
+
+def test_app_takes_the_menu_family_out_of_qts_arguments():
+    from salome_agent_gui.app import split_family
+
+    assert split_family(["prog", "--mode", "rag", "-style", "x"]) == ("rag", ["prog", "-style", "x"])
+    assert split_family(["prog", "--mode=agent"]) == ("agent", ["prog"])
+    assert split_family(["prog"]) == (None, ["prog"])

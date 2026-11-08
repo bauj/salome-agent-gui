@@ -12,12 +12,28 @@ dependencies = ["salome-agent", "PyQt5", "PyQt5-Qt5==5.15.19", "PyQtWebEngine==5
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt"]
+# The documentation modes (raglib, the `raglib` submodule): versions as in
+# raglib/requirements.txt, except langchain-core, which constraints.txt pins for
+# langgraph. torch must come from the CPU index first, or pip pulls CUDA wheels:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+rag = ["torch", "langchain-core", "langchain-chroma==1.1.0", "langchain-openai==1.1.12",
+       "langchain-huggingface==1.2.1", "chromadb==1.5.5", "sentence-transformers==6.0.0",
+       "rank_bm25==0.2.2", "deepagents==0.7.8", "beautifulsoup4==4.14.3", "markdownify==1.2.3",
+       "transformers==5.3.0"]
 
 [project.scripts]
 salome-agent-gui = "salome_agent_gui.app:main"
+salome-agent-rag-index = "salome_agent_gui.rag_backend:main_index"
 
 [tool.setuptools]
-packages = ["salome_agent_gui"]
+# raglib is not a package: its sources ship as salome_agent_gui/_raglib/
+# (salome_agent_gui.rag_backend puts its chatbot/ and extraction/ on sys.path)
+packages = ["salome_agent_gui", "salome_agent_gui._raglib"]
+
+[tool.setuptools.package-dir]
+"salome_agent_gui._raglib" = "raglib"
 
 [tool.setuptools.package-data]
 salome_agent_gui = ["config.example.json", "web/*"]
+"salome_agent_gui._raglib" = ["LICENSE", "chatbot/*.py", "chatbot/core/*.py",
+                              "extraction/*.py"]

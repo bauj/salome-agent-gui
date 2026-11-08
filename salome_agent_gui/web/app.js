@@ -26,10 +26,24 @@ const TONE = { ok: "ok", needs_input: "info", degraded: "warn", ended: "warn", a
 
 // Kept in step with salome_agent.cli (MAX_IMAGES, MAX_IMAGE_BYTES), which the
 // bridge holds every message to: the formats the vision LLM accepts, and the limits.
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+// recognised by content, like the engine (salome_agent.cli._image_mime): the type the
+// browser reports comes from the extension and the system, and can be empty for a
+// WEBP dropped from another desktop or pasted from some applications
+function imageMime(b) {
+  const at = (i, s) => [...s].every((c, k) => b[i + k] === c.charCodeAt(0));
+  if (at(0, "RIFF") && at(8, "WEBP")) return "image/webp";
+  if (b[0] === 0x89 && at(1, "PNG\r\n\x1a\n")) return "image/png";
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (at(0, "GIF87a") || at(0, "GIF89a")) return "image/gif";
+  if (at(0, "BM")) return "image/bmp";
+  return null;
+}
 const MAX_IMAGES = 10;
 const MAX_IMAGES_MB = 20;   // all images of a message together
 const HINT = "Enter to send · Shift+Enter for a new line";
+const DOC_MODES = ["rag", "rag_agentic"];
+const PLACEHOLDER = { agent: "Describe what to build, or ask for a change…",
+                      doc: "Ask a question about SALOME…" };
 
 let bridge = null;
 const state = { busy: false, open: false, canSend: false, stopping: false, locked: false, settings: null };
@@ -468,6 +482,160 @@ function visionCard(vm) {
   return card;
 }
 
+// ---- documentation answers ----------------------------------------------
+// A small Markdown subset drawn with DOM nodes and textContent only: the
+// answer comes from the LLM and never reaches innerHTML.
+function linkNode(text, target) {
+  const a = el("a", null, text);
+  if (/^https?:\/\//.test(target)) {
+    a.title = target;
+    a.addEventListener("click", (e) => { e.preventDefault(); bridge.openLink(target); });
+  }
+  return a;
+}
+
+const INLINE = /(`+)([\s\S]*?)\1|\*\*([\s\S]+?)\*\*|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()\]]*[^\s<>()\].,;:!?'"])|\*([^*\s][^*]*?)\*/g;
+
+function inline(parent, text) {
+  let last = 0;
+  const re = new RegExp(INLINE.source, "g");          // own lastIndex: inline() recurses
+  for (let m; (m = re.exec(text)) !== null;) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m[1]) parent.appendChild(el("code", null, m[2]));
+    else if (m[3] !== undefined) inline(parent.appendChild(el("strong")), m[3]);
+    else if (m[4] !== undefined) {
+      if (/^https?:\/\//.test(m[5])) inline(parent.appendChild(linkNode("", m[5])), m[4]);
+      else inline(parent, m[4]);                       // a relative link goes nowhere: keep its text
+    } else if (m[6]) parent.appendChild(linkNode(m[6], m[6]));
+    else inline(parent.appendChild(el("em")), m[7]);
+    last = re.lastIndex;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  return parent;
+}
+
+function inlineLines(parent, lines) {
+  lines.forEach((line, i) => {
+    if (i) parent.appendChild(el("br"));
+    inline(parent, line);
+  });
+  return parent;
+}
+
+function markdownNode(text) {
+  const root = el("div", "answer");
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  let i = 0;
+  const isList = (l) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
+  const blockStart = (l) => /^\s*(```|#{1,6}\s|>)/.test(l) || isList(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i += 1; continue; }
+    const fence = line.match(/^\s*```\s*([\w+-]*)/);
+    if (fence) {
+      const body = [];
+      for (i += 1; i < lines.length && !/^\s*```/.test(lines[i]); i += 1) body.push(lines[i]);
+      i += 1;                                           // the closing fence (or the end)
+      const pre = el("pre");
+      const code = el("code", null, body.join("\n"));
+      if (fence[1]) code.dataset.lang = fence[1];
+      pre.appendChild(code);
+      root.appendChild(pre);
+      continue;
+    }
+    const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (h) {
+      inline(root.appendChild(el(`h${Math.min(h[1].length, 4)}`)), h[2].replace(/\s+#+\s*$/, ""));
+      i += 1;
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      const quote = [];
+      for (; i < lines.length && /^\s*>/.test(lines[i]); i += 1) quote.push(lines[i].replace(/^\s*>\s?/, ""));
+      inlineLines(root.appendChild(el("blockquote")), quote);
+      continue;
+    }
+    if (isList(line)) {
+      const ordered = /^\s*\d+[.)]/.test(line);
+      const list = root.appendChild(el(ordered ? "ol" : "ul"));
+      let item = null;
+      for (; i < lines.length; i += 1) {
+        const l = lines[i];
+        if (isList(l)) {
+          item = list.appendChild(el("li"));
+          inline(item, l.replace(/^\s*([-*+]|\d+[.)])\s+/, ""));
+        } else if (l.trim() && /^\s+/.test(l) && !/^\s*```/.test(l)) {
+          item.appendChild(el("br"));
+          inline(item, l.trim());                       // an indented continuation line
+        } else break;
+      }
+      continue;
+    }
+    const para = [];
+    for (; i < lines.length && lines[i].trim() && !(para.length && blockStart(lines[i])); i += 1) {
+      para.push(lines[i]);
+    }
+    inlineLines(root.appendChild(el("p")), para);
+  }
+  return root;
+}
+
+const ANSWER_TITLE = { running: "Looking it up", done: "Answer", failed: "Could not answer",
+                       stopped: "Stopped" };
+
+function answerCard(vm) {
+  const r = vm.rag;
+  const card = el("div", "card answer-card");
+  const head = el("div", "card-head");
+  const [cls, icon] = (r.status === "running" ? STEP.running : r.status === "failed" ? STEP.failed
+                       : r.status === "stopped" ? STEP.stopped : STEP.ok);
+  const st = el("span", cls);
+  if (icon) svg(st, icon);
+  head.appendChild(st);
+  let title = ANSWER_TITLE[r.status] || "Answer";
+  if (r.status === "running") {
+    title = r.phase === "loading" ? "Loading the documentation index…"
+      : (r.agentic ? "Searching and reading the documentation…" : "Searching the documentation…");
+  }
+  head.appendChild(el("span", null, title));
+  head.appendChild(el("span", "count", r.agentic ? "· agentic RAG" : "· RAG"));
+  head.appendChild(turnClock(vm));
+  card.appendChild(head);
+  if (r.status !== "done") return card;
+  if (r.degraded) {
+    card.appendChild(el("div", "answer-warn",
+      "The model's answer could not be checked against the pages it read; these are the pages to look at."));
+  }
+  card.appendChild(markdownNode(r.answer || "(empty answer)"));
+  if (r.sources && r.sources.length) {
+    const d = el("details", "sources");
+    d.open = true;
+    d.appendChild(el("summary", null, `Sources · ${plural(r.sources.length, "page")}`));
+    const ol = el("ol");
+    for (const src of r.sources) {
+      const li = el("li");
+      const target = src.url || src.path;
+      li.appendChild(target ? linkNode(src.title, target) : el("span", null, src.title));
+      if (target && !src.url) {
+        li.firstChild.title = target;
+        li.firstChild.addEventListener("click", (e) => { e.preventDefault(); bridge.openLink(target); });
+      }
+      const meta = [src.module, src.category].filter((x) => x && x !== "Unknown").join(" · ");
+      if (meta) li.appendChild(el("span", "src-meta", meta));
+      ol.appendChild(li);
+    }
+    d.appendChild(ol);
+    card.appendChild(d);
+  }
+  const u = el("div", "usage answer-foot");
+  if (r.steps) u.appendChild(el("span", null, plural(r.steps, "agent message")));
+  if (r.usage && r.usage.input_tokens !== undefined) {
+    u.appendChild(el("span", null, `${fmtTokens(r.usage.input_tokens)} in / ${fmtTokens(r.usage.output_tokens || 0)} out`));
+  }
+  if (u.children.length) card.appendChild(u);
+  return card;
+}
+
 function turnNode(vm) {
   const wrap = el("div", "msg-agent");
   wrap.dataset.turn = String(vm.id);
@@ -478,6 +646,13 @@ function turnNode(vm) {
   wrap.appendChild(av);
   wrap.appendChild(body);
   const gate = vm.gate;
+  if (vm.rag) {                                         // a documentation answer
+    body.appendChild(answerCard(vm));
+    if (vm.status !== "running" && vm.status !== "ok" && vm.status !== "aborted") {
+      body.appendChild(resultBlock(vm));
+    }
+    return wrap;
+  }
   // planner and chat-edit reasoning: the turn level, drawn before any card exists
   const turnReasoning = el("div", "turn-reasoning");
   for (const key of ["planner", "edit"]) {
@@ -544,7 +719,138 @@ function setBusy(p) {
   send.title = p.busy ? "Stop" : "Send";
   send.disabled = p.busy ? p.stopping : !p.can_send;
   if (!hintTimer) showHint();
+  setDocMode(!!p.doc);
   lockRunOptions(p.open);
+  renderModeSwitch(p.mode, p.can_switch_mode, p.modes);
+}
+
+// the header's choice of assistant; Bridge.setMode saves it as gui.mode. The
+// SALOME menu entry that opened the window decides which modes it offers.
+function renderModeSwitch(mode, canSwitch, modes) {
+  if (mode === undefined) return;
+  if (Array.isArray(modes)) {
+    for (const b of $("mode-switch").querySelectorAll("button")) b.hidden = !modes.includes(b.dataset.mode);
+    $("mode-switch").hidden = modes.length < 2;
+    for (const o of $("set-mode").options) o.hidden = !modes.includes(o.value);
+  }
+  const why = canSwitch ? "" : (mode === "agent"
+    ? " · end the conversation (New conversation) to switch" : " · wait for the answer to switch");
+  for (const b of $("mode-switch").querySelectorAll("button")) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+    b.disabled = !canSwitch;
+    if (!b.dataset.baseTip) b.dataset.baseTip = b.title;
+    b.title = b.dataset.baseTip + (canSwitch ? "" : why);
+  }
+}
+
+function setDocMode(doc) {
+  document.body.classList.toggle("doc-mode", doc);
+  if (doc && attached.length) {                         // images are not read in these modes
+    attached = [];
+    renderAttachments();
+  }
+  $("input").placeholder = doc ? PLACEHOLDER.doc : PLACEHOLDER.agent;
+}
+
+// one background job at a time: the index build or a model download
+function setIndex(p) {
+  const models = p.job === "models";
+  const line = $(models ? "models-job" : "rag-index-state");
+  line.className = "idx-state";
+  line.textContent = p.line || "";
+  $("btn-build-index").disabled = !!p.building;
+  $("btn-build-index").textContent = p.building && !models ? "Building…" : "Build index";
+  for (const role of ["embedding", "reranker"]) {
+    const b = $(`btn-dl-${role}`);
+    b.disabled = !!p.building;
+    b.textContent = p.building && models ? "Downloading…" : "Download";
+  }
+}
+
+// ---- local models (raglib's download_models.py) ---------------------------
+const MODEL_STATE = {
+  installed: (s) => `Installed${s.size ? " · " + s.size : ""}`,
+  local: (s) => `Local folder${s.size ? " · " + s.size : ""}`,
+  missing: () => "Not installed",
+  api: () => "API endpoint: nothing to download",
+  none: () => "No model set",
+};
+
+function modelState(id, st, edited) {
+  const span = $(id);
+  if (edited) {
+    span.className = "model-state";
+    span.textContent = "Changed: Download saves and checks it";
+    return true;
+  }
+  span.className = "model-state " + (st.state || "");
+  span.textContent = (MODEL_STATE[st.state] || (() => ""))(st);
+  span.title = st.path || "";
+  return st.state === "missing";
+}
+
+function renderModelStates() {
+  const m = (state.settings || {}).rag_models;
+  if (!m) return;
+  const embEdited = $("set-emb-model").value.trim() !== m.embedding.model;
+  const rrEdited = $("set-rr-model").value.trim() !== m.reranker.model
+    || $("set-rr-type").value !== m.reranker.type;
+  $("btn-dl-embedding").hidden = !modelState("emb-state", m.embedding.status, embEdited)
+    || m.embedding.type === "api";
+  $("btn-dl-reranker").hidden = !modelState("rr-state", m.reranker.status, rrEdited);
+}
+
+function renderModels(m) {
+  if (!m) return;
+  $("set-emb-model").value = m.embedding.model;
+  $("set-rr-model").value = m.reranker.model;
+  $("set-rr-type").value = m.reranker.type;
+  $("rr-role").textContent = m.reranker.enabled ? "Reranker" : "Reranker (off)";
+  $("rr-card").title = "Re-scores the passages a search found, when Rerank results is on (Search)"
+    + (m.reranker.enabled ? "" : ": it is off, so this model is not used now");
+  for (const [id, list] of [["emb-choices", m.choices.embedding], ["rr-choices", m.choices.reranker]]) {
+    const dl = $(id);
+    dl.textContent = "";
+    for (const c of list) {
+      const o = el("option");
+      o.value = c.model;
+      o.label = c.note;
+      dl.appendChild(o);
+    }
+  }
+  $("models-cache").textContent = `Models are kept in ${m.cache}.`;
+  renderModelStates();
+}
+
+function readModels() {
+  return { embedding_model: $("set-emb-model").value.trim(),
+           reranker_model: $("set-rr-model").value.trim(),
+           reranker_type: $("set-rr-type").value };
+}
+
+function downloadModel(role) {
+  if (saveSettings(false)) bridge.downloadModels(role);
+}
+
+function renderRagInfo(r) {
+  r = r || {};
+  $("rag-index").textContent = r.configured ? (r.index || "rag.chatbot.chromadb_path is not set")
+    : "No rag section in this configuration yet: choose a documentation mode and save to add one.";
+  const line = $("rag-index-state");
+  if (r.building && r.job !== "models") {
+    setIndex({ building: true, job: "index", line: r.line });
+    return;
+  }
+  setIndex({ building: !!r.building, job: "models", line: r.models_line });
+  if (!r.building && r.models_line) $("models-job").classList.add("warn");   // a failed download
+  line.className = "idx-state";
+  line.textContent = "";
+  if (!r.configured) return;
+  line.textContent = r.index_exists ? "Index found." + (r.line ? ` Last build: ${r.line}.` : "")
+    : "No index yet: build it before asking questions.";
+  line.classList.add(r.index_exists ? "ok" : "warn");
 }
 
 function setStatus(p) {
@@ -633,6 +939,106 @@ function readModuleRows() {
   return out;
 }
 
+// ---- documentation sources (rag.extraction.modules) ----------------------
+const SOURCE_FIELDS = [
+  ["description", "Description", "What this documentation covers; the agentic RAG reads it to choose where to search"],
+  ["dev_path", "API reference folder", "HTML folder of the Doxygen API reference (share/doc/salome/tui/<MODULE>)"],
+  ["user_path", "User guide folder", "HTML folder of the Sphinx user guide (share/doc/salome/gui/<MODULE>)"]];
+const CITE_FIELDS = [
+  ["cite_dev", "Online API reference URL", "Answers link API reference pages here, e.g. docs.salome-platform.org/latest/tui/GEOM"],
+  ["cite_user", "Online user guide URL", "Answers link user guide pages here, e.g. docs.salome-platform.org/latest/gui/GEOM"]];
+const SOURCE_NAME = /^[A-Za-z0-9][\w.+-]*$/;
+
+function pathState(st) {
+  if (!st || st.state === "empty") return null;
+  const line = el("div", "src-state " + st.state);
+  line.textContent = st.state === "ok" ? `found: ${st.resolved}`
+    : st.state === "unset" ? `not set here: ${st.vars.map((v) => "$" + v).join(", ")} (start SALOME's environment)`
+    : `not found: ${st.resolved}`;
+  return line;
+}
+
+function sourceRow(row) {
+  const r = el("div", "src-row");
+  r.dataset.orig = row.name || "";
+  const head = el("div", "mod-line");
+  const name = el("input");
+  name.dataset.key = "name";
+  name.placeholder = "Name, e.g. GEOM";
+  name.title = "Module name: shown with each cited page and used to filter the search";
+  name.value = row.name || "";
+  head.appendChild(name);
+  const cite = el("button", "linkish", "online links…");
+  cite.type = "button";
+  cite.title = "Where answers link the pages of this source on the web";
+  head.appendChild(cite);
+  const del = el("button", "linkish", "remove");
+  del.type = "button";
+  del.title = "Leave this source out of the next index build";
+  del.addEventListener("click", () => r.remove());
+  head.appendChild(del);
+  r.appendChild(head);
+  const field = ([key, label, tip], parent) => {
+    const f = el("div", "field");
+    f.title = tip;
+    f.appendChild(el("label", null, label));
+    const input = el("input");
+    input.dataset.key = key;
+    input.value = row[key] || "";
+    f.appendChild(input);
+    parent.appendChild(f);
+    return f;
+  };
+  for (const spec of SOURCE_FIELDS) {
+    field(spec, r);
+    const short = spec[0] === "dev_path" ? "dev" : spec[0] === "user_path" ? "user" : null;
+    const st = short && pathState(row[short + "_state"]);
+    if (st) r.appendChild(st);
+  }
+  const box = el("div", "src-cite");
+  box.hidden = !!row.name;                    // a new source shows them
+  for (const spec of CITE_FIELDS) field(spec, box);
+  cite.addEventListener("click", () => { box.hidden = !box.hidden; });
+  r.appendChild(box);
+  if (row.json_only && row.json_only.length) {
+    r.appendChild(el("div", "t-help json-only", `also set in JSON: ${row.json_only.join(", ")}`));
+  }
+  return r;
+}
+
+function renderSources(rows) {
+  const host = $("doc-sources");
+  host.textContent = "";
+  for (const row of rows || []) host.appendChild(sourceRow(row));
+  $("sources-error").hidden = true;
+}
+
+function readSources() {
+  const out = [];
+  for (const r of $("doc-sources").querySelectorAll(".src-row")) {
+    const row = { orig: r.dataset.orig };
+    for (const input of r.querySelectorAll("input[data-key]")) row[input.dataset.key] = input.value.trim();
+    out.push(row);
+  }
+  return out;
+}
+
+// mirrors config_store._save_doc_sources
+function sourcesError(rows) {
+  const seen = new Set();
+  for (const row of rows) {
+    if (!row.name && !row.description && !row.dev_path && !row.user_path) continue;
+    if (!SOURCE_NAME.test(row.name)) {
+      return row.name ? `Source name "${row.name}": use letters, digits, _ . + - (no spaces).`
+        : "Every documentation source needs a name.";
+    }
+    if (seen.has(row.name)) return `Documentation source "${row.name}" is listed twice.`;
+    seen.add(row.name);
+    if (!row.dev_path && !row.user_path) return `Source "${row.name}": give at least one folder.`;
+  }
+  return "";
+}
+
 // mirrors config_store._save_modules: another host never gets the shared key;
 // only rows whose endpoint was edited here are checked
 function modulesError(shared, sharedUrl) {
@@ -650,18 +1056,61 @@ function modulesError(shared, sharedUrl) {
   return "";
 }
 
+// documentation-mode knobs: [input id, rag_options key, modes that show it]
+const RAG_NUMBERS = [
+  ["set-rag-k", "k_standard", ["rag"]],
+  ["set-rag-top", "top_n_after_rerank", ["rag"]],
+  ["set-rag-expand", "expansion_char_budget", ["rag"]],
+  ["set-rag-tokens", "max_tokens", ["rag", "rag_agentic"]],
+  ["set-ag-steps", "max_steps", ["rag_agentic"]],
+  ["set-ag-page", "max_chars_per_page", ["rag_agentic"]],
+  ["set-ag-sections", "section_top_n", ["rag_agentic"]],
+  ["set-ag-budget", "section_char_budget", ["rag_agentic"]],
+];
+const RAG_SWITCHES = [
+  ["set-rag-reranker", "reranker", ["rag", "rag_agentic"]],
+  ["set-rag-bm25", "bm25_enabled", ["rag", "rag_agentic"]],
+  ["set-rag-title", "title_boost_enabled", ["rag", "rag_agentic"]],
+  ["set-rag-hyde", "hyde_enabled", ["rag"]],
+];
+
+// the drawer shows the options of the mode the Assistant select holds
+function showDrawerMode(mode) {
+  for (const n of $("drawer").querySelectorAll("[data-modes]")) {
+    n.hidden = !n.dataset.modes.split(" ").includes(mode);
+  }
+}
+
+function readRagOptions(mode) {
+  const out = {};
+  for (const [id, key, modes] of RAG_NUMBERS) {
+    const v = parseInt($(id).value, 10);
+    if (modes.includes(mode) && !Number.isNaN(v)) out[key] = v;
+  }
+  for (const [id, key, modes] of RAG_SWITCHES) {
+    if (modes.includes(mode)) out[key] = $(id).classList.contains("on");
+  }
+  const t = parseFloat($("set-rag-temp").value);
+  if (!Number.isNaN(t)) out.temperature = t;
+  return out;
+}
+
 function lockRunOptions(locked) {
   state.locked = locked;
-  for (const id of ["set-on-failure", "set-tools", "set-verbose", "set-detail", "set-cadence",
-                    "set-cap", "set-budget", "set-vision-fix",
-                    "set-timeout"]) $(id).disabled = locked;
+  for (const id of ["set-mode", "set-on-failure", "set-tools", "set-verbose", "set-detail",
+                    "set-cadence", "set-cap", "set-budget", "set-vision-fix",
+                    "set-timeout", "set-rag-temp", "set-emb-model", "set-rr-model", "set-rr-type",
+                    ...RAG_NUMBERS.map((r) => r[0])]) $(id).disabled = locked;
+  for (const [id] of RAG_SWITCHES) $(id).classList.toggle("disabled", locked);
   for (const input of $("module-rows").querySelectorAll("input")) input.disabled = locked;
   $("set-batch").classList.toggle("disabled", locked);
   $("set-shared").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
   $("btn-load-config").disabled = locked;
   $("run-lock").hidden = !locked;
+  $("mode-lock").hidden = !locked;
   $("model-lock").hidden = !locked;
+  for (const n of $("drawer").querySelectorAll(".lock-note:not([id])")) n.hidden = !locked;
 }
 
 function setSettings(s) {
@@ -677,6 +1126,17 @@ function setSettings(s) {
   $("set-cadence").value = s.verify_cadence || "final";
   $("set-cap").value = String(s.tool_iteration_cap ?? 12);
   $("set-theme").value = s.theme;
+  $("set-mode").value = s.mode || "agent";
+  showDrawerMode($("set-mode").value);
+  const rag = s.rag_options || {};
+  for (const [id, key] of RAG_NUMBERS) $(id).value = rag[key] == null ? "" : String(rag[key]);
+  for (const [id, key] of RAG_SWITCHES) $(id).classList.toggle("on", !!rag[key]);
+  $("set-rag-temp").value = rag.temperature == null ? "" : String(rag.temperature);
+  setDocMode(DOC_MODES.includes(s.active_mode));
+  renderModeSwitch(s.active_mode, s.can_switch_mode, s.mode_order);
+  renderSources(s.doc_sources);
+  renderModels(s.rag_models);
+  renderRagInfo(s.rag);
   $("set-batch").classList.toggle("on", !!s.batch);
   $("batch-sw").classList.toggle("on", !!s.batch);
   $("set-reasoning").classList.toggle("on", !!s.show_reasoning);
@@ -697,7 +1157,8 @@ function openSettings() { document.body.classList.add("settings-open"); }
 function closeSettings() { document.body.classList.remove("settings-open"); }
 function cancelSettings() { if (state.settings) setSettings(state.settings); closeSettings(); }
 
-function saveSettings() {
+// close: false keeps the drawer open (Build index saves what it shows first)
+function saveSettings(close = true) {
   const out = {
     base_url: $("set-base-url").value.trim(),
     model: $("set-model").value.trim(),
@@ -713,9 +1174,10 @@ function saveSettings() {
     if (err) {
       $("models-error").textContent = err;
       $("models-error").hidden = false;
-      return;
+      return false;
     }
     Object.assign(out, {
+      mode: $("set-mode").value,
       batch: $("set-batch").classList.contains("on"),
       on_stage_failure: $("set-on-failure").value,
       tool_selection: $("set-tools").value,
@@ -729,9 +1191,27 @@ function saveSettings() {
       vision_fix_retries: parseInt($("set-vision-fix").value, 10),
       timeout: parseInt($("set-timeout").value, 10),
     });
+    // a documentation mode's options go to rag.chatbot; the agent mode leaves them alone
+    if (DOC_MODES.includes(out.mode)) {
+      out.rag_options = readRagOptions(out.mode);
+      out.rag_models = readModels();
+    }
+  }
+  // the sources feed the index build, not an open conversation: saved even when locked
+  if (DOC_MODES.includes($("set-mode").value)) {
+    const sources = readSources();
+    const err = sourcesError(sources);
+    if (err) {
+      $("sources-error").textContent = err;
+      $("sources-error").hidden = false;
+      $("sources-error").scrollIntoView({ block: "center" });
+      return false;
+    }
+    out.doc_sources = sources;
   }
   bridge.saveSettings(JSON.stringify(out));
-  closeSettings();
+  if (close) closeSettings();
+  return true;
 }
 
 // ---- composer -----------------------------------------------------------
@@ -774,31 +1254,41 @@ function renderAttachments() {
   box.hidden = attached.length === 0;
 }
 
-function readFile(file) {
+function readFile(file, how = "readAsDataURL") {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result);
     r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
+    r[how](file);
   });
+}
+
+// the image as a data: URI labelled with the type its bytes show, or null
+async function imageUrl(file) {
+  const mime = imageMime(new Uint8Array(await readFile(file.slice(0, 16), "readAsArrayBuffer")));
+  if (!mime) return null;
+  const url = await readFile(file);
+  return `data:${mime};base64,` + url.slice(url.indexOf(",") + 1);
 }
 
 async function attachFiles(files) {
   const errors = [];
   for (const f of files) {
-    if (!IMAGE_TYPES.includes(f.type)) {
-      errors.push(`${f.name || "That file"} is not a PNG, JPEG, WEBP, GIF or BMP image`);
-    } else if (attached.reduce((n, a) => n + a.size, f.size) > MAX_IMAGES_MB * 1024 * 1024) {
+    if (attached.reduce((n, a) => n + a.size, f.size) > MAX_IMAGES_MB * 1024 * 1024) {
       errors.push(`${f.name} would take this message past ${MAX_IMAGES_MB} MB of images`);
     } else if (attached.length >= MAX_IMAGES) {
       errors.push(`At most ${MAX_IMAGES} images per message`);
       break;
     } else {
+      let url = null;
       try {
-        attached.push({ name: f.name || "pasted image", size: f.size, url: await readFile(f) });
+        url = await imageUrl(f);
       } catch (e) {
         errors.push(`Could not read ${f.name}`);
+        continue;
       }
+      if (url) attached.push({ name: f.name || "pasted image", size: f.size, url });
+      else errors.push(`${f.name || "That file"} is not a PNG, JPEG, WEBP, GIF or BMP image`);
     }
   }
   renderAttachments();
@@ -851,16 +1341,41 @@ function wire() {
   $("btn-help").addEventListener("click", () => { $("help").hidden = !$("help").hidden; });
   $("btn-settings").addEventListener("click", openSettings);
   for (const id of ["btn-close-settings", "btn-cancel", "scrim"]) $(id).addEventListener("click", cancelSettings);
-  $("btn-save").addEventListener("click", saveSettings);
+  $("btn-save").addEventListener("click", () => saveSettings());
   $("btn-reconnect").addEventListener("click", () => bridge.reconnect());
   $("btn-edit-json").addEventListener("click", () => bridge.editConfigJson());
   $("btn-load-config").addEventListener("click", () => bridge.loadConfig());
+  $("btn-build-index").addEventListener("click", () => { if (saveSettings(false)) bridge.buildIndex(); });
+  $("btn-dl-embedding").addEventListener("click", () => downloadModel("embedding"));
+  $("btn-dl-reranker").addEventListener("click", () => downloadModel("reranker"));
+  $("set-emb-model").addEventListener("input", renderModelStates);
+  $("set-rr-type").addEventListener("change", renderModelStates);
+  $("set-rr-model").addEventListener("input", () => {
+    // a model from raglib's list brings its type
+    const known = (((state.settings || {}).rag_models || {}).choices || { reranker: [] }).reranker
+      .find((c) => c.model === $("set-rr-model").value.trim());
+    if (known) $("set-rr-type").value = known.type;
+    renderModelStates();
+  });
+  $("btn-add-source").addEventListener("click", () => {
+    const r = sourceRow({});
+    $("doc-sources").appendChild(r);
+    r.querySelector("input").focus();
+  });
   $("set-reasoning").addEventListener("click", () => $("set-reasoning").classList.toggle("on"));
   $("set-shared").addEventListener("click", () => {
     if (state.locked) return;
     $("module-rows").hidden = $("set-shared").classList.toggle("on");
     $("models-error").hidden = true;
   });
+  $("set-mode").addEventListener("change", () => showDrawerMode($("set-mode").value));
+  for (const b of $("mode-switch").querySelectorAll("button")) {
+    b.addEventListener("click", () => { if (!b.disabled && !b.classList.contains("on")) bridge.setMode(b.dataset.mode); });
+  }
+  showDrawerMode($("set-mode").value);
+  for (const [id] of RAG_SWITCHES) {
+    $(id).addEventListener("click", () => { if (!state.locked) $(id).classList.toggle("on"); });
+  }
   $("set-batch").addEventListener("click", () => {
     if (!state.locked) $("set-batch").classList.toggle("on");
   });
@@ -934,6 +1449,7 @@ const handlers = {
   setStatus,
   setSettings,
   setTheme,
+  setIndex,
   reset: () => { col().textContent = ""; updateEmpty(); },
   replay,
 };

@@ -5,9 +5,10 @@ import time
 import pytest
 
 from salome_agent_gui import web_view
-from tools.page_fixtures import (BUSY, DONE_VM, EDIT_VM, FAILED_VM, IDLE_NEW, IDLE_OPEN, PLAN_VM,
-                                 MODELS_SETTINGS, SETTINGS, STATUS_OFF, STATUS_OK,
-                                 VISION_CONFLICTS_VM, FakeBridge, vision_running_vm)
+from tools.page_fixtures import (BUSY, DOC_IDLE, DOC_SETTINGS, DOC_VM, DONE_VM, EDIT_VM, FAILED_VM,
+                                 IDLE_NEW, IDLE_OPEN, PLAN_VM, MODELS_SETTINGS, SETTINGS,
+                                 STATUS_OFF, STATUS_OK, VISION_CONFLICTS_VM, FakeBridge,
+                                 vision_running_vm)
 
 pytestmark = pytest.mark.web
 
@@ -685,3 +686,202 @@ def test_chat_edit_turn_runs_with_a_clock_then_shows_its_time(qtbot, page):
     head = run_js(qtbot, view, "document.querySelector('.card-head').textContent")
     assert "done in" in head
     assert run_js(qtbot, view, "!!document.querySelector('[data-start]')") is False
+
+
+# ---- documentation modes --------------------------------------------------
+def doc_page(qtbot, view, fake):
+    fake.emit("setSettings", DOC_SETTINGS)
+    fake.emit("setBusy", DOC_IDLE)
+    wait_js(qtbot, view, "document.body.classList.contains('doc-mode')")
+
+
+def test_doc_mode_hides_the_agent_controls(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    visible = "(id) => getComputedStyle(document.getElementById(id)).display !== 'none'"
+    for id_ in ("btn-undo", "btn-rebuild", "btn-attach", "auto"):
+        assert run_js(qtbot, view, f"({visible})('{id_}')") is False, id_
+    assert run_js(qtbot, view, "document.getElementById('input').placeholder") == \
+        "Ask a question about SALOME…"
+    fake.emit("setBusy", IDLE_OPEN)
+    wait_js(qtbot, view, "!document.body.classList.contains('doc-mode')")
+    assert run_js(qtbot, view, f"({visible})('btn-undo')") is True
+
+
+def test_doc_answer_renders_markdown_and_sources(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    fake.emit("renderTurn", DOC_VM)
+    wait_js(qtbot, view, "document.querySelector('.answer') !== null")
+    assert run_js(qtbot, view, "document.querySelector('.answer strong').textContent") == \
+        "local hypothesis"
+    assert run_js(qtbot, view, "document.querySelectorAll('.answer ol > li').length") == 2
+    assert "params.SetMaxSize(2.0)" in run_js(qtbot, view,
+                                               "document.querySelector('.answer pre code').textContent")
+    assert run_js(qtbot, view, "document.querySelectorAll('.sources li').length") == 3
+    assert run_js(qtbot, view, "document.querySelector('.answer-foot').textContent") == \
+        "9 agent messages18k in / 410 out"
+
+
+def test_doc_answer_text_is_never_html(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    rag = dict(DOC_VM["rag"], answer=f"**{EVIL}** `{EVIL}`\n\n- {EVIL}\n\n```\n{EVIL}\n```\n"
+                                     f"[{EVIL}](javascript:alert(1)) [x](https://e.org/{EVIL})",
+               sources=[{"title": EVIL, "module": EVIL, "category": "", "url": "", "path": EVIL}])
+    fake.emit("renderTurn", dict(DOC_VM, rag=rag))
+    wait_js(qtbot, view, "document.querySelector('.answer') !== null")
+    assert run_js(qtbot, view, "document.querySelectorAll('#col img:not(.avatar)').length") == 0
+    assert run_js(qtbot, view, "document.querySelectorAll('.answer a[href], .sources a[href]').length") == 0
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+
+
+def test_doc_links_go_through_the_bridge(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    fake.emit("renderTurn", DOC_VM)
+    wait_js(qtbot, view, "document.querySelector('.answer a') !== null")
+    run_js(qtbot, view, "document.querySelector('.answer a').click();"
+                        "document.querySelectorAll('.sources a')[2].click(); true")
+    qtbot.waitUntil(lambda: len([c for c in fake.calls if c[0] == "openLink"]) == 2, timeout=3000)
+    links = [c[1] for c in fake.calls if c[0] == "openLink"]
+    assert links[0].endswith("/gui/SMESH/constructing_submeshes.html")
+    assert links[1].endswith("classsmeshBuilder_1_1Mesh.html")
+
+
+def test_mode_is_saved_and_locks_with_the_run_options(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, locked=False))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('set-mode').value = 'rag';"
+                        "document.getElementById('btn-save').click(); true")
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    assert [c for c in fake.calls if c[0] == "saveSettings"][-1][1]["mode"] == "rag"
+    fake.emit("setSettings", dict(DOC_SETTINGS, locked=True))
+    wait_js(qtbot, view, "document.getElementById('set-mode').disabled")
+    assert run_js(qtbot, view, "document.getElementById('mode-lock').hidden") is False
+
+
+def test_build_index_button_and_progress(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    run_js(qtbot, view, "document.getElementById('btn-build-index').click(); true")
+    qtbot.waitUntil(lambda: ("buildIndex",) in fake.calls, timeout=3000)
+    fake.emit("setIndex", {"building": True, "line": "GEOM: 120 pages"})
+    wait_js(qtbot, view, "document.getElementById('btn-build-index').disabled")
+    assert run_js(qtbot, view, "document.getElementById('rag-index-state').textContent") == \
+        "GEOM: 120 pages"
+
+
+# ---- the settings drawer follows the Assistant select ---------------------
+RAG_OPTIONS = {"k_standard": 40, "top_n_after_rerank": 15, "expansion_char_budget": 60000,
+               "max_tokens": 5000, "bm25_enabled": True, "title_boost_enabled": True,
+               "hyde_enabled": False, "temperature": 0.0, "reranker": True, "max_steps": 20,
+               "max_chars_per_page": 8000, "section_top_n": 5, "section_char_budget": 15000}
+SHOWN = ("(id) => { const n = document.getElementById(id);"
+         " return !!(n.offsetWidth || n.offsetHeight || n.getClientRects().length); }")
+
+
+def _shown(qtbot, view, ids):
+    return {i: run_js(qtbot, view, f"({SHOWN})('{i}')") for i in ids}
+
+
+@pytest.mark.parametrize("mode, shown, hidden", [
+    ("agent", ["set-shared", "set-on-failure", "conn-card", "set-advanced"],
+     ["rag-index", "set-rag-k", "set-ag-steps", "set-rag-temp", "set-rag-reranker"]),
+    ("rag", ["rag-index", "set-rag-k", "set-rag-hyde", "set-rag-reranker", "set-rag-temp"],
+     ["set-shared", "set-on-failure", "conn-card", "set-ag-steps", "set-advanced"]),
+    ("rag_agentic", ["rag-index", "set-ag-steps", "set-ag-budget", "set-rag-reranker", "set-rag-temp"],
+     ["set-shared", "set-on-failure", "conn-card", "set-rag-k", "set-rag-hyde"]),
+])
+def test_drawer_shows_only_the_selected_mode_options(qtbot, page, mode, shown, hidden):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, rag_options=RAG_OPTIONS, rag=DOC_SETTINGS["rag"]))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        f"const m = document.getElementById('set-mode'); m.value = '{mode}';"
+                        "m.dispatchEvent(new Event('change')); true")
+    qtbot.wait(300)                                # drawer slide-in
+    state = _shown(qtbot, view, shown + hidden)
+    assert {i for i in shown if not state[i]} == set()
+    assert {i for i in hidden if state[i]} == set()
+    for i in ("set-base-url", "set-model", "set-theme"):      # shared by every mode
+        assert _shown(qtbot, view, [i])[i], i
+
+
+def test_cancel_restores_the_saved_mode_view(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, rag_options=RAG_OPTIONS))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "const m = document.getElementById('set-mode'); m.value = 'rag';"
+                        "m.dispatchEvent(new Event('change'));"
+                        "document.getElementById('btn-cancel').click(); true")
+    assert run_js(qtbot, view, "document.getElementById('set-mode').value") == "agent"
+    assert run_js(qtbot, view, "document.getElementById('set-rag-k').closest('[data-modes]').hidden") is True
+
+
+def test_doc_mode_save_sends_its_rag_options_only(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, rag_options=RAG_OPTIONS))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "const m = document.getElementById('set-mode'); m.value = 'rag_agentic';"
+                        "m.dispatchEvent(new Event('change'));"
+                        "document.getElementById('set-ag-steps').value = '7';"
+                        "document.getElementById('set-rag-reranker').click();"
+                        "document.getElementById('btn-save').click(); true")
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    sent = [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
+    opts = sent["rag_options"]
+    assert opts["max_steps"] == 7 and opts["reranker"] is False and opts["temperature"] == 0.0
+    assert "k_standard" not in opts and "hyde_enabled" not in opts
+
+
+def test_agent_mode_save_sends_no_rag_options(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(SETTINGS, rag_options=RAG_OPTIONS))
+    run_js(qtbot, view, "document.getElementById('btn-settings').click();"
+                        "document.getElementById('btn-save').click(); true")
+    qtbot.waitUntil(lambda: any(c[0] == "saveSettings" for c in fake.calls), timeout=3000)
+    assert "rag_options" not in [c for c in fake.calls if c[0] == "saveSettings"][-1][1]
+
+
+def test_rag_options_lock_while_a_conversation_is_open(qtbot, page):
+    view, fake = page
+    fake.emit("setSettings", dict(DOC_SETTINGS, rag_options=RAG_OPTIONS, locked=True))
+    wait_js(qtbot, view, "document.getElementById('set-ag-steps').disabled")
+    assert run_js(qtbot, view, "document.getElementById('set-rag-reranker').classList.contains('disabled')") is True
+    run_js(qtbot, view, "document.getElementById('set-rag-reranker').click(); true")
+    assert run_js(qtbot, view, "document.getElementById('set-rag-reranker').classList.contains('on')") is True
+
+
+def test_attachments_are_recognised_by_content_so_a_webp_without_a_type_is_kept(qtbot, page):
+    view, fake = page
+    run_js(qtbot, view, """
+      window.__done = false;
+      const webp = new Uint8Array([82,73,70,70, 0,0,0,0, 87,69,66,80, 86,80,56,32, 0,0]);
+      const png = new Uint8Array([0x89,80,78,71,13,10,26,10, 0,0,0,13]);
+      attachFiles([new File([webp], "photo.webp", {type: ""}),               // no type: WSL drop, paste
+                   new File([png], "shot.webp", {type: "image/webp"}),        // mislabelled
+                   new File(["hello"], "notes.png", {type: "image/png"})])   // not an image
+        .then(() => { window.__done = true; });
+      true""")
+    qtbot.waitUntil(lambda: run_js(qtbot, view, "window.__done") is True, timeout=5000)
+    urls = run_js(qtbot, view, "attached.map((a) => a.url.slice(0, a.url.indexOf(',')))")
+    assert urls == ["data:image/webp;base64", "data:image/png;base64"]
+    assert "notes.png is not a PNG, JPEG, WEBP, GIF or BMP image" in run_js(qtbot, view, "$('hint').textContent")
+    assert ".webp" in run_js(qtbot, view, "$('file').accept")
+
+
+def test_the_menu_family_hides_the_other_modes(qtbot, page):
+    view, fake = page
+    js = ("JSON.stringify([...document.querySelectorAll('#mode-switch button')]"
+          ".filter(b => !b.hidden).map(b => b.dataset.mode))")
+    fake.emit("setBusy", dict(DOC_IDLE, modes=["rag", "rag_agentic"]))
+    wait_js(qtbot, view, f"{js} === '[\"rag\",\"rag_agentic\"]'")
+    assert run_js(qtbot, view, "document.getElementById('mode-switch').hidden") is False
+    fake.emit("setSettings", dict(DOC_SETTINGS, mode_order=["rag", "rag_agentic"]))
+    wait_js(qtbot, view, "[...document.getElementById('set-mode').options]"
+                         ".filter(o => !o.hidden).map(o => o.value).join() === 'rag,rag_agentic'")
+    fake.emit("setBusy", dict(IDLE_OPEN, modes=["agent"]))     # one mode: no switch at all
+    wait_js(qtbot, view, "document.getElementById('mode-switch').hidden === true")
+    fake.emit("setBusy", dict(IDLE_OPEN, modes=["rag", "rag_agentic", "agent"]))
+    wait_js(qtbot, view, "document.getElementById('mode-switch').hidden === false")

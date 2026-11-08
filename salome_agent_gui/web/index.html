@@ -3,7 +3,7 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
-<title>SALOME Agent</title>
+<title>SALOME agentic assistants</title>
 <link rel="stylesheet" href="app.css">
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script src="app.js" defer></script>
@@ -11,13 +11,18 @@
 <body class="is-empty">
 
 <header class="header">
-  <div class="brand"><img class="logo" src="salome-s.png" alt="">SALOME Agent</div>
+  <div class="brand"><img class="logo" src="salome-s.png" alt=""><span class="brand-name">SALOME agentic assistants</span></div>
+  <div class="mode-switch" id="mode-switch" role="radiogroup" aria-label="Assistant">
+    <button role="radio" data-mode="rag" title="Answers from the SALOME documentation after one search">Classical RAG</button>
+    <button role="radio" data-mode="rag_agentic" title="The model searches and reads the documentation several times: slower, better on harder questions">Agentic RAG</button>
+    <button role="radio" data-mode="agent" title="Builds geometry and meshes in this SALOME study">Agentic assistant</button>
+  </div>
   <span class="status off" id="status"><span class="dot"></span><span id="status-label">Not connected</span></span>
   <span class="spacer"></span>
-  <button class="icon-btn" id="btn-undo" data-tip="Undo last turn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
-  <button class="icon-btn" id="btn-redo" data-tip="Redo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
-  <button class="icon-btn" id="btn-rebuild" data-tip="Rebuild the study from the model" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
-  <span class="hdr-sep"></span>
+  <button class="icon-btn agent-only" id="btn-undo" data-tip="Undo last turn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+  <button class="icon-btn agent-only" id="btn-redo" data-tip="Redo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+  <button class="icon-btn agent-only" id="btn-rebuild" data-tip="Rebuild the study from the model" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
+  <span class="hdr-sep agent-only"></span>
   <button class="icon-btn" id="btn-new" data-tip="New conversation" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
   <button class="icon-btn" id="btn-theme" data-tip="Dark theme"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
   <button class="icon-btn" id="btn-help" data-tip="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></svg></button>
@@ -26,20 +31,33 @@
 
 <div class="banner" id="banner" hidden></div>
 <div class="help" id="help" hidden>
-  The first message starts a conversation: I propose a plan, you approve or edit it, and each
+  <span class="doc-only">Ask anything about SALOME: each question is answered from the SALOME
+  documentation, with links to the pages used. RAG searches the index once and answers; agentic
+  RAG lets the model search and read pages several times, which is slower but follows harder
+  questions. Questions are answered one by one, without memory of the previous ones. Choose
+  Agentic assistant at the top of the window to build models.</span>
+  <span class="agent-only">The first message starts a conversation: I propose a plan, you approve or edit it, and each
   stage is built in this SALOME study. Follow-up messages change that model ("make the roof
   taller", "add a chimney"). Undo and Redo step through turns; Rebuild recreates the study from
   the model when they got out of sync; New conversation starts over. While a conversation is
   open it keeps the agent server to itself. result.py and report.md are linked after each turn.
   Attach sketches, photos or drawings with the paperclip, by dropping them on the window or by
-  pasting them: the model is built from what they show.
+  pasting them: the model is built from what they show.</span>
 </div>
 
 <div class="empty">
   <img class="logo-big" src="salome-s.png" alt="">
-  <h2>What should we build?</h2>
-  <p>Describe a part or an assembly, or attach a sketch or a photo of it. I'll propose a plan, build it in this SALOME study, and you can keep refining it by chatting.</p>
-  <div class="suggestions">
+  <h2 class="agent-only">What should we build?</h2>
+  <p class="agent-only">Describe a part or an assembly, or attach a sketch or a photo of it. I'll propose a plan, build it in this SALOME study, and you can keep refining it by chatting.</p>
+  <h2 class="doc-only">What would you like to know about SALOME?</h2>
+  <p class="doc-only">Ask a question about GEOM, SHAPER, SMESH or their Python API. I'll answer from the SALOME documentation and link the pages I used.</p>
+  <div class="suggestions doc-only">
+    <button class="suggestion" data-text="How do I create a box and a cylinder with geompy, then fuse them?">Create and fuse shapes with geompy<small>box, cylinder, fuse</small></button>
+    <button class="suggestion" data-text="How do I set a local mesh size on a face in SMESH?">Local mesh size in SMESH<small>on one face</small></button>
+    <button class="suggestion" data-text="What is the difference between NETGEN 1D-2D-3D and the separate 1D, 2D and 3D algorithms?">NETGEN algorithms<small>1D-2D-3D or separate</small></button>
+    <button class="suggestion" data-text="How do I export a mesh to a MED file from a Python script?">Export a mesh to MED<small>from a Python script</small></button>
+  </div>
+  <div class="suggestions agent-only">
     <button class="suggestion" data-text="A small car with 4 torus wheels, red body and black wheels">A small car with 4 torus wheels<small>red body, black wheels</small></button>
     <button class="suggestion" data-text="A vase with a 2 mm wall, revolved profile and a filleted rim">A vase with a 2 mm wall<small>revolved profile, filleted rim</small></button>
     <button class="suggestion" data-text="A bracket with 4 mounting holes, then mesh it with tetrahedra">A bracket with 4 mounting holes<small>then mesh it with tetrahedra</small></button>
@@ -54,9 +72,9 @@
     <div class="attachments" id="attachments" hidden></div>
     <textarea id="input" rows="1" placeholder="Describe what to build, or ask for a change…"></textarea>
     <div class="composer-row">
-      <button class="icon-btn tip-up" id="btn-attach" data-tip="Attach images"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button>
-      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
-      <span class="mode" id="auto" title="Skips plan approval and the stage-failure prompt"><span class="switch small" id="batch-sw"></span>Run without asking</span>
+      <button class="icon-btn tip-up agent-only" id="btn-attach" data-tip="Attach images"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button>
+      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.png,.jpg,.jpeg,.webp,.gif,.bmp" multiple hidden>
+      <span class="mode agent-only" id="auto" title="Skips plan approval and the stage-failure prompt"><span class="switch small" id="batch-sw"></span>Run without asking</span>
       <span class="spacer"></span>
       <span class="hint" id="hint">Enter to send · Shift+Enter for a new line</span>
       <button class="send" id="send" title="Send" disabled></button>
@@ -74,21 +92,54 @@
   </div>
   <div class="drawer-body">
     <div>
+      <div class="section-title">Mode <span class="lock-note" id="mode-lock" hidden>— locked while a conversation is open</span></div>
+      <div class="field" title="Also chosen at the top of the window. The Agentic assistant builds geometry and meshes in this study. The documentation modes answer questions from the SALOME documentation (raglib): RAG searches once, agentic RAG lets the model search and read pages several times"><label for="set-mode">Assistant</label><select id="set-mode"><option value="rag">Classical RAG</option><option value="rag_agentic">Agentic RAG</option><option value="agent">Agentic assistant: build models</option></select></div>
+    </div>
+    <div data-modes="rag rag_agentic">
+      <div class="section-title">Documentation sources</div>
+      <div class="t-note">What Build index reads (rag.extraction.modules). Paths may use $DOCUMENTATION_ROOT_DIR, $GEOM_ROOT_DIR… and ${VAR:-fallback}; build the index again after a change.</div>
+      <div id="doc-sources" class="module-rows"></div>
+      <div class="err-note" id="sources-error" hidden></div>
+      <div class="drawer-actions"><button class="btn" id="btn-add-source" title="Another documentation tree to index, e.g. a SMESH plugin or your own HTML pages">Add source</button></div>
+    </div>
+    <div data-modes="rag rag_agentic">
+      <div class="section-title">Local models <span class="lock-note" hidden>— locked while a conversation is open</span></div>
+      <div class="t-note">Run on this computer (sentence-transformers). The answers use the chat model below. <span id="models-cache"></span></div>
+      <div class="model-card" title="Turns the pages and each question into vectors: used by Build index and by every search. After a change, build the index again.">
+        <div class="mod-line"><span class="model-role">Embedding</span><span class="model-state" id="emb-state"></span><span class="spacer"></span><button class="btn small" id="btn-dl-embedding" title="Download this model into the Hugging Face cache">Download</button></div>
+        <div class="field" title="rag.chatbot.embedding.model and rag.extraction.embedding.model (kept identical): a sentence-transformers model name, a Hugging Face repository or a local folder"><label for="set-emb-model">Model</label><input id="set-emb-model" list="emb-choices" spellcheck="false"></div>
+      </div>
+      <div class="model-card" id="rr-card" title="Re-scores the passages a search found, when Rerank results is on (Search)">
+        <div class="mod-line"><span class="model-role" id="rr-role">Reranker</span><span class="model-state" id="rr-state"></span><span class="spacer"></span><button class="btn small" id="btn-dl-reranker" title="Download this model into the Hugging Face cache">Download</button></div>
+        <div class="field" title="rag.chatbot.reranker.model"><label for="set-rr-model">Model</label><input id="set-rr-model" list="rr-choices" spellcheck="false"></div>
+        <div class="field" title="rag.chatbot.reranker.type: how the model scores a passage against the question"><label for="set-rr-type">Type</label><select id="set-rr-type"><option value="late_interaction">Late interaction (ColBERT)</option><option value="cross_encoder">Cross-encoder</option></select></div>
+      </div>
+      <datalist id="emb-choices"></datalist><datalist id="rr-choices"></datalist>
+      <div class="idx-state" id="models-job"></div>
+    </div>
+    <div data-modes="rag rag_agentic" title="The model below is used unless rag.chatbot.llm sets one">
+      <div class="section-title">Documentation index</div>
+      <div class="path" id="rag-index"></div>
+      <div class="idx-state" id="rag-index-state"></div>
+      <div class="drawer-actions"><button class="btn" id="btn-build-index" title="Index the documentation sources above; needs the documentation installed with SALOME, and takes a while">Build index</button></div>
+    </div>
+    <div data-modes="agent">
       <div class="section-title">Agent server</div>
       <div class="conn-card" id="conn-card"><span class="dot"></span><span id="conn-label"></span><span class="spacer"></span><button class="btn ghost small" id="btn-reconnect" title="Look for the agent server SALOME runs again">Reconnect</button></div>
     </div>
     <div>
-      <div class="section-title">Model <span class="lock-note" id="model-lock" hidden>— modules and advanced locked while a conversation is open</span></div>
-      <div class="toggle-row" title="Off: choose a model, or another endpoint, per module (e.g. a drawing reader for vision)"><div><div class="t-label">Same model for every module</div></div><span class="switch" id="set-shared"></span></div>
+      <div class="section-title">Model <span class="lock-note" id="model-lock" hidden>— <span data-modes="agent">modules and advanced </span>locked while a conversation is open</span></div>
+      <div class="toggle-row" data-modes="agent" title="Off: choose a model, or another endpoint, per module (e.g. a drawing reader for vision)"><div><div class="t-label">Same model for every module</div></div><span class="switch" id="set-shared"></span></div>
+      <div class="t-note" data-modes="rag rag_agentic">Shared with the Agentic assistant; rag.chatbot.llm in Edit JSON… overrides it for the documentation modes.</div>
       <div class="field" title="Endpoint base URL, up to and including /v1"><label for="set-base-url">LLM base URL</label><input id="set-base-url"></div>
       <div class="row2">
         <div class="field" title="Model name sent with every request (each module uses it unless overridden below)"><label for="set-model">Model</label><input id="set-model"></div>
         <div class="field" title="Sent as Authorization: Bearer <key>; leave empty for an endpoint without auth"><label for="set-api-key">API key</label><input id="set-api-key" type="password"></div>
       </div>
       <div class="field" title="CA bundle for an HTTPS endpoint with a private CA; empty uses the system trust store"><label for="set-ssl-cert">CA certificate file</label><input id="set-ssl-cert" placeholder="System trust store"></div>
-      <div id="module-rows" class="module-rows" hidden></div>
+      <div data-modes="agent"><div id="module-rows" class="module-rows" hidden></div></div>
       <div class="err-note" id="models-error" hidden></div>
-      <details class="advanced" id="set-advanced"><summary>Advanced</summary>
+      <details class="advanced" id="set-advanced" data-modes="agent"><summary>Advanced</summary>
         <div class="row2">
           <div class="field" title="Approx tokens the model may think before it acts; past it the call is cut and re-asked once, a second cut ends the stage; 0 = no limit"><label for="set-budget">Reasoning budget (0 = off)</label><input id="set-budget" type="number" min="0" max="200000" step="1000"></div>
           <div class="field" title="How many times the image reader is sent its spec's errors (open outline, arc off its radius, hole outside...) to fix them; errors left go to the build"><label for="set-vision-fix">Vision fix rounds</label><input id="set-vision-fix" type="number" min="0" max="5" step="1"></div>
@@ -96,7 +147,7 @@
         <div class="field" title="Seconds one LLM call may run in total; a call still generating at the limit is cut and not retried"><label for="set-timeout">LLM timeout (s)</label><input id="set-timeout" type="number" min="10" max="1800" step="10"></div>
       </details>
     </div>
-    <div>
+    <div data-modes="agent">
       <div class="section-title">Runs <span class="lock-note" id="run-lock" hidden>— locked while a conversation is open</span></div>
       <div class="toggle-row" title="Skips plan approval and the stage-failure prompt; a failed stage follows &quot;When a stage fails&quot;"><div><div class="t-label">Run without asking</div></div><span class="switch" id="set-batch"></span></div>
       <div class="row2">
@@ -112,6 +163,38 @@
       </div>
       <div class="field" title="How much the run logs. LLM trace also writes every prompt, response and reasoning to the run folder"><label for="set-verbose">Log detail</label><select id="set-verbose"><option value="0">Normal</option><option value="1">Verbose</option><option value="2">LLM trace (-vv)</option></select></div>
       <div class="toggle-row" title="Debug: what the model thinks while it works, under each stage"><div><div class="t-label">Show model reasoning</div></div><span class="switch" id="set-reasoning"></span></div>
+    </div>
+    <div data-modes="rag rag_agentic">
+      <div class="section-title">Search <span class="lock-note" hidden>— locked while a conversation is open</span></div>
+      <div class="toggle-row" title="Re-score the retrieved passages with a reranker model (rag.chatbot.reranker): better ordering, slower first question"><div><div class="t-label">Rerank results</div></div><span class="switch" id="set-rag-reranker"></span></div>
+      <div class="toggle-row" title="Also search by keywords (BM25) and merge with the semantic search; uses the keyword file the index build writes"><div><div class="t-label">Keyword search</div></div><span class="switch" id="set-rag-bm25"></span></div>
+      <div class="toggle-row" title="One more keyword search over page titles only, for questions naming a class or a function; needs keyword search"><div><div class="t-label">Boost page titles</div></div><span class="switch" id="set-rag-title"></span></div>
+      <div data-modes="rag">
+        <div class="row2">
+          <div class="field" title="How many passages the search gathers before reranking (rag.chatbot.k_standard)"><label for="set-rag-k">Passages searched</label><input id="set-rag-k" type="number" min="1" max="500" step="5"></div>
+          <div class="field" title="How many passages are kept after reranking and sent to the model (rag.chatbot.top_n_after_rerank)"><label for="set-rag-top">Passages kept</label><input id="set-rag-top" type="number" min="1" max="200" step="1"></div>
+        </div>
+        <div class="field" title="Characters the kept passages may grow by when their whole section is added (rag.chatbot.expansion_char_budget); 0 = passages only"><label for="set-rag-expand">Section context (characters)</label><input id="set-rag-expand" type="number" min="0" max="1000000" step="5000"></div>
+        <div class="toggle-row" title="HyDE: the model first writes a likely answer and the search uses it instead of the question; one more LLM call per question"><div><div class="t-label">Search with a drafted answer</div></div><span class="switch" id="set-rag-hyde"></span></div>
+      </div>
+    </div>
+    <div data-modes="rag_agentic">
+      <div class="section-title">Agentic RAG <span class="lock-note" hidden>— locked while a conversation is open</span></div>
+      <div class="row2">
+        <div class="field" title="Most steps (searches, page reads, the answer) the agent may take for one question (rag.chatbot.agentic.max_steps)"><label for="set-ag-steps">Agent steps</label><input id="set-ag-steps" type="number" min="1" max="100" step="1"></div>
+        <div class="field" title="A page the agent reads is cut after this many characters (rag.chatbot.agentic.max_chars_per_page)"><label for="set-ag-page">Characters per page</label><input id="set-ag-page" type="number" min="500" max="200000" step="500"></div>
+      </div>
+      <div class="row2">
+        <div class="field" title="How many documentation sections one search returns (rag.chatbot.agentic.section_top_n)"><label for="set-ag-sections">Sections per search</label><input id="set-ag-sections" type="number" min="1" max="50" step="1"></div>
+        <div class="field" title="Characters shared by the sections one search returns (rag.chatbot.agentic.section_char_budget)"><label for="set-ag-budget">Section characters</label><input id="set-ag-budget" type="number" min="1000" max="500000" step="1000"></div>
+      </div>
+    </div>
+    <div data-modes="rag rag_agentic">
+      <div class="section-title">Answers <span class="lock-note" hidden>— locked while a conversation is open</span></div>
+      <div class="row2">
+        <div class="field" title="Sampling temperature of the answers (rag.chatbot.temperature); 0 is the most factual"><label for="set-rag-temp">Temperature</label><input id="set-rag-temp" type="number" min="0" max="2" step="0.1"></div>
+        <div class="field" title="Longest answer the model may write, in tokens (rag.chatbot.max_tokens)"><label for="set-rag-tokens">Answer length (tokens)</label><input id="set-rag-tokens" type="number" min="64" max="64000" step="250"></div>
+      </div>
     </div>
     <div>
       <div class="section-title">Appearance</div>

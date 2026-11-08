@@ -64,6 +64,55 @@ and then meshing it in SMESH.
 - **`result.py`,** a standalone script that rebuilds everything in SALOME without the agent.
 - **`report.md`,** a record of the run.
 
+### Ask the documentation
+
+The same window can also answer questions about SALOME instead of building models. The plugin
+adds a **Tools > Plugins > AI tools** submenu with two entries:
+
+| Entry | What it opens |
+|---|---|
+| **SALOME agent** | The chat window as the **Agentic assistant**: it builds geometry and meshes in your study, as described above, and its settings are the agent's |
+| **Documentation (RAG)** | The chat window on the documentation, with a switch at the top between **Classical RAG** (one search, answers from the best passages) and **Agentic RAG** (the model searches and reads pages several times: slower, better at questions that span several pages) |
+
+There is one window: choosing the other entry while it is open moves it there, unless an Agentic
+assistant conversation is open (end it first with New conversation, since switching would lose
+it). The documentation switch works between questions. The mode is saved as `gui.mode`. Run by
+hand (`salome-agent-gui.sh` with no `--mode`), the window offers all three modes.
+
+Each answer lists the pages it was built from, with links to docs.salome-platform.org. Questions
+are answered one by one, with no memory of the previous ones, and need no agent server. Both
+documentation modes come from [raglib](https://github.com/bauj/rag_and_chatbot), included as
+the `raglib` submodule.
+
+They need an index of the SALOME HTML documentation. Build it once with **Build index** in the
+settings, or from a terminal. The documentation comes from your SALOME installation, found
+through its environment: `$DOCUMENTATION_ROOT_DIR/share/doc/salome/{gui,tui}/<MODULE>`, or each
+module's `$<MODULE>_ROOT_DIR` when `DOCUMENTATION_ROOT_DIR` is not set. Run the command in
+SALOME's environment (or `export DOCUMENTATION_ROOT_DIR=<SALOME>/INSTALL/DOCUMENTATION`):
+
+```bash
+~/SALOME-9.16.0-native-FD44-SRC/salome shell -- \
+    ~/.local/share/salome-agent-gui/bin/salome-agent-gui.sh --build-index [config.json]
+```
+
+All three modes share one config file, `~/.config/salome/salome-agent.json`, seeded from
+[`salome_agent_gui/config.example.json`](salome_agent_gui/config.example.json): `llm` is the
+endpoint every mode uses, `salome`/`policy`/`work_dir` are the agent's, `rag` holds raglib's
+`chatbot` and `extraction` configs, and `gui.mode` (`agent`, `rag` or `rag_agentic`) picks the
+mode. Paths in `rag` expand `~`, `$VAR` and the shell's `${VAR:-fallback}`; relative paths are
+relative to the config file.
+
+Both documentation modes also run two small models on your computer: an embedding model, used
+by the index build and every search, and a reranker. They are the ones raglib's
+`download_models.py` lists. The settings' **Local models** section shows whether each one is in
+the Hugging Face cache (`~/.cache/huggingface/hub`, or `$HF_HUB_CACHE`), lets you choose another
+one, and has a **Download** button for a missing one. **Build index** downloads a missing embedding
+model by itself.
+
+The launcher leaves SALOME's own Python behind, and runs the chat window and the index build from
+`~/.local/share/salome-agent/rag`. Set `SALOME_AGENT_GUI_DATA_DIR` to use another directory: that
+is where raglib writes its `debug_traces/` when `rag.chatbot.agentic.debug` is on.
+
 ### Not there yet
 
 The agent does not set up or run solvers, or post-process results. Always check what it builds:
@@ -78,7 +127,9 @@ There are two ways. Both were tested on the SALOME 9.16.0 package for Fedora 44.
 
 Either way, you need a SALOME that runs on Python 3.10 or newer, and internet access for GitHub and
 PyPI. The install takes about 500 MB, most of it Qt and Chromium: the chat window is a web page
-drawn in Qt WebEngine, and SALOME does not provide WebEngine, so a full copy is embedded.
+drawn in Qt WebEngine, and SALOME does not provide WebEngine, so a full copy is embedded. The
+documentation modes add about 2 GB: CPU-only PyTorch, ChromaDB, and the embedding models
+downloaded on first use.
 
 ### With the install script
 
@@ -105,7 +156,8 @@ cd salome-agent-gui
 ```
 
 Everything goes in `~/.local/share/salome-agent-gui` (give another directory as a second
-argument). Nothing is written in your SALOME directory.
+argument). Nothing is written in your SALOME directory. Set `RAG=0` to leave out the
+documentation modes (`RAG=0 ./install.sh ...`).
 
 **3. Start SALOME through the launcher the install created:**
 
@@ -146,7 +198,10 @@ SAT/sat init --reset_projects
 SAT/sat init --add_project "$PWD/SAT_SALOME/salome.pyconf"
 ```
 
-**3. Download and build salome-agent-gui:**
+**3. Download and build salome-agent-gui.** This one product holds all three assistants, and it
+replaces `sarag` (the separate salome-assistant documentation chatbot): leave `sarag` out of the
+application, or SALOME shows two menu entries. Set `SALOME_AGENT_GUI_RAG=0` before compiling to
+leave out the documentation modes (about 2 GB: CPU-only torch, chromadb, embedding models).
 
 ```bash
 SAT/sat prepare SALOME-9.16.0-native -p salome_agent_gui
@@ -172,7 +227,8 @@ To update: close SALOME, run `git pull` and `git submodule update --init` in
 
 ## First start
 
-1. Open **Tools > Plugins > SALOME Agent**. This opens the chat window.
+1. Open **Tools > Plugins > AI tools > SALOME agent** (or **Documentation (RAG)**). This opens
+   the chat window on that assistant.
 2. Click the gear icon and enter your model's **endpoint, API key and model name**.
 3. Type what you want to build.
 
@@ -194,18 +250,46 @@ be able to read images. You can choose a different model for each module in the 
 
 ## Settings
 
-The gear icon opens the settings: your model, how finely the agent plans, how much it checks its
-work, retries, batch mode and theme. Each option explains itself in a tooltip.
+The gear icon opens the settings. They show only the options of the mode chosen under
+**Assistant** (the same choice as the switch at the top of the window), and they switch as soon
+as you pick another mode:
+
+- **Agentic assistant:** the agent server, the model per module, how finely the agent plans, how much
+  it checks its work, retries and batch mode.
+- **Classical RAG:** the documentation index, the search (reranker, keyword search, title
+  boost, passages searched and kept, section context, drafted-answer search) and the answers.
+- **Agentic RAG:** the documentation index, the search toggles, the agent's limits
+  (steps, characters per page, sections per search) and the answers.
+
+The model endpoint, the theme and the configuration file are shared by every mode. Each option
+explains itself in a tooltip.
 
 They are saved in `~/.config/salome/salome-agent.json`. **Load config** switches to another file.
 The [configuration reference](https://github.com/bauj/salome-agent/blob/main/docs/configuration.md)
-describes every setting.
+describes every setting of the agent.
+
+The window adds two sections of its own to that file:
+
+- **`gui`:** window options, including `mode`, which can be `agent`, `rag` or `rag_agentic`.
+- **`rag`:** raglib's two configurations. `rag.chatbot` holds retrieval, the reranker and the
+  `agentic` limits. `rag.extraction` lists the documentation to index. Each follows
+  [raglib's own schema](https://github.com/bauj/rag_and_chatbot#readme). Relative paths are read
+  from the config file's directory, and `~` and `$VARIABLES` are expanded. Leave out
+  `rag.chatbot.llm` to use the model above, or set some of its keys to override that model.
+
+Every mode's settings live in that one file. A config file from before the documentation modes
+gets the `rag` section from `salome_agent_gui/config.example.json` when the window starts
+(`"rag": null` is left alone). Turning the reranker off keeps its block under
+`rag.chatbot._reranker_off`, so turning it back on restores your model.
 
 ## Development
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ./salome-agent -e '.[dev]'
 QT_QPA_PLATFORM=xcb .venv/bin/python -m pytest   # all tests; needs a display
+# the documentation modes for real (CPU torch first):
+.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/pip install -c constraints.txt -e '.[rag,dev]'
 ```
 
 The page tests (marker `web`) need Qt WebEngine and a real display; with
@@ -213,8 +297,9 @@ The page tests (marker `web`) need Qt WebEngine and a real display; with
 `tools/render_states.py OUTDIR` renders the page's states to PNG for review.
 Python dependencies are pinned by `constraints.txt`.
 
-The `salome-agent` submodule pins the engine; after bumping it, check that
-`git ls-tree HEAD salome-agent` shows the intended engine commit.
+The `salome-agent` submodule pins the engine, and `raglib` pins the documentation chatbot. After
+bumping either one, check that `git ls-tree HEAD salome-agent raglib` shows the intended commits.
+The wheel ships raglib's sources as `salome_agent_gui/_raglib/`.
 
 ## License
 

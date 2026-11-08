@@ -36,3 +36,23 @@ def gui_state(tmp_path, monkeypatch):
     path = tmp_path / "gui-state" / "salome-agent-gui.json"
     monkeypatch.setattr(config_store, "GUI_STATE", path)
     return path
+
+
+@pytest.fixture(autouse=True)
+def hf_cache(tmp_path, monkeypatch):
+    """An empty Hugging Face cache: model states never depend on this machine's."""
+    cache = tmp_path / "hf-hub"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache))
+    return cache
+
+
+@pytest.fixture(autouse=True)
+def launcher_state(tmp_path, monkeypatch):
+    """Keep the menu's request file off the real ~/.local/share/salome-agent."""
+    import sagui_launcher
+    from salome_agent_gui import main_window
+
+    data = tmp_path / "salome-agent-data"
+    monkeypatch.setattr(sagui_launcher, "data_dir", lambda: data)
+    monkeypatch.setattr(main_window, "request_path", lambda: data / "gui-request.json")
+    return data
