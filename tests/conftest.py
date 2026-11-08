@@ -48,11 +48,13 @@ def hf_cache(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def launcher_state(tmp_path, monkeypatch):
-    """Keep the menu's request file off the real ~/.local/share/salome-agent."""
+    """Keep the menu's request file and the MCP server's port/token/pid files
+    off the real ~/.local/share/salome-agent."""
     import sagui_launcher
-    from salome_agent_gui import main_window
+    from salome_agent_gui import main_window, mcp_server
 
     data = tmp_path / "salome-agent-data"
     monkeypatch.setattr(sagui_launcher, "data_dir", lambda: data)
     monkeypatch.setattr(main_window, "request_path", lambda: data / "gui-request.json")
+    monkeypatch.setattr(mcp_server, "HTTP_FILE", data / "mcp-http.json")
     return data
