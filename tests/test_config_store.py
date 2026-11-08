@@ -6,9 +6,16 @@ import stat
 import pytest
 
 from salome_agent_gui import config_store as cs
+from salome_agent_gui import rag_models
 
 SEED = {"llm": {"base_url": "", "api_key": "", "model": ""},
         "salome": {"root": "/path/to/your/SALOME"}, "policy": {}}
+
+
+RAG_DEFAULTS = {"k_standard": 40, "top_n_after_rerank": 15, "expansion_char_budget": 60000,
+                "max_tokens": 2000, "bm25_enabled": True, "title_boost_enabled": True,
+                "hyde_enabled": False, "temperature": 0.0, "reranker": False, "max_steps": 20,
+                "max_chars_per_page": 8000, "section_top_n": 5, "section_char_budget": 15000}
 
 
 def _seed(tmp_path):
@@ -66,10 +73,12 @@ def test_read_settings_defaults_when_sections_are_missing(tmp_path):
     assert cs.read_settings(user) == {
         "base_url": "", "model": "", "api_key": "", "ssl_cert_file": "", "on_stage_failure": "abort",
         "tool_selection": "hints", "batch": False, "verbose": 0, "theme": "system",
-        "show_reasoning": False, "verify_cadence": "final", "plan_detail": "balanced",
+        "mode": "agent", "show_reasoning": False, "verify_cadence": "final", "plan_detail": "balanced",
         "tool_iteration_cap": 12,
         "shared_model": True, "modules": {}, "modules_json_only": {},
-        "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
+        "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120,
+        "rag_options": RAG_DEFAULTS, "doc_sources": [],
+        "rag_models": rag_models.models_view({})}
 
 
 def test_save_settings_writes_llm_policy_and_gui(tmp_path):
@@ -82,10 +91,12 @@ def test_save_settings_writes_llm_policy_and_gui(tmp_path):
     assert cs.read_settings(user) == {
         "base_url": "http://h/v1", "model": "m", "api_key": "k", "ssl_cert_file": "/etc/ca.pem",
         "on_stage_failure": "continue", "tool_selection": "all", "batch": True, "verbose": 2, "theme": "dark",
-        "show_reasoning": False, "verify_cadence": "strict", "plan_detail": "fine",
+        "mode": "agent", "show_reasoning": False, "verify_cadence": "strict", "plan_detail": "fine",
         "tool_iteration_cap": 30,
         "shared_model": True, "modules": {}, "modules_json_only": {},
-        "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
+        "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120,
+        "rag_options": RAG_DEFAULTS, "doc_sources": [],
+        "rag_models": rag_models.models_view({})}
     data = json.loads(user.read_text())
     assert data["salome"] == SEED["salome"]
     assert data["gui"] == {"theme": "dark", "batch": True, "verbose": 2}
@@ -378,3 +389,61 @@ def test_broken_window_geometry_reads_as_none(tmp_path, text):
     state = tmp_path / "gui.json"
     state.write_text(text)
     assert cs.window_geometry(state) is None
+
+
+# ---- documentation modes in the same file ----------------------------------
+def test_rag_options_read_the_example_rag_section(tmp_path):
+    from salome_agent_gui import rag_backend
+
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps(dict(SEED, rag=rag_backend.default_rag())))
+    opts = cs.read_settings(p)["rag_options"]
+    assert opts["reranker"] is True and opts["max_tokens"] == 5000 and opts["max_steps"] == 20
+
+
+def test_rag_options_save_into_rag_chatbot_and_keep_other_keys(tmp_path):
+    user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
+    cs.save_settings(user, {"mode": "rag_agentic", "rag_options": {
+        "k_standard": 9999, "top_n_after_rerank": 7, "temperature": 0.3, "hyde_enabled": True,
+        "max_steps": 12, "section_top_n": "junk"}})
+    data = json.loads(user.read_text())
+    chatbot = data["rag"]["chatbot"]
+    assert chatbot["k_standard"] == 500 and chatbot["top_n_after_rerank"] == 7
+    assert chatbot["temperature"] == 0.3 and chatbot["hyde_enabled"] is True
+    assert chatbot["agentic"]["max_steps"] == 12 and chatbot["agentic"]["section_top_n"] == 5
+    assert chatbot["project_name"] == "salome" and data["rag"]["extraction"]
+    assert data["salome"] == SEED["salome"]
+    cs.load(user)                                  # raglib still accepts it
+
+
+def test_rag_options_are_locked_with_the_run_options(tmp_path):
+    user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
+    cs.save_settings(user, {"rag_options": {"max_tokens": 900}}, run_options=False)
+    assert "rag" not in json.loads(user.read_text())
+
+
+def test_reranker_off_parks_the_block_and_on_brings_it_back(tmp_path):
+    user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
+    cs.save_settings(user, {"mode": "rag", "rag_options": {}})
+    data = json.loads(user.read_text())
+    data["rag"]["chatbot"]["reranker"] = {"model": "BAAI/bge-reranker-v2-m3", "type": "cross_encoder"}
+    user.write_text(json.dumps(data))
+    cs.save_settings(user, {"rag_options": {"reranker": False}})
+    assert cs.read_settings(user)["rag_options"]["reranker"] is False
+    cs.load(user)                                  # the parked block is a comment to raglib
+    cs.save_settings(user, {"rag_options": {"reranker": True}})
+    chatbot = json.loads(user.read_text())["rag"]["chatbot"]
+    assert chatbot["reranker"]["type"] == "cross_encoder" and cs.RERANKER_PARKED not in chatbot
+
+
+def test_complete_config_adds_the_rag_section_once(tmp_path):
+    user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
+    assert cs.complete_config(user) is True
+    data = json.loads(user.read_text())
+    assert data["rag"]["chatbot"] and data["salome"] == SEED["salome"]
+    assert cs.complete_config(user) is False
+    data["rag"] = None
+    user.write_text(json.dumps(data))
+    assert cs.complete_config(user) is False
+    assert json.loads(user.read_text())["rag"] is None
+    assert cs.complete_config(tmp_path / "gone.json") is False

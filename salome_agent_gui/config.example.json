@@ -1,0 +1,124 @@
+{
+  "_comment": "One file for the three assistants; gui.mode picks one (\"agent\", \"rag\" or \"rag_agentic\"), also from the settings. llm: the endpoint every mode uses. salome, policy, work_dir: the SALOME Agent only. rag: the two documentation modes (rag.chatbot.agentic: the agentic one only). Keys starting with _ are comments.",
+  "llm": { "base_url": "", "api_key": "", "model": "", "ssl_cert_file": "", "temperature": 0, "timeout": 120, "json_retries": 2, "vision_fix_retries": 2, "max_retries": 2, "reasoning_budget": 20000, "carry_reasoning": true, "loop_retries": 3, "text_tool_calls": true, "extra_headers": {}, "extra_body": {}, "module_extra_body": {}, "modules": {} },
+  "salome": {
+    "root": "/path/to/your/SALOME"
+  },
+  "policy": {
+    "tool_iteration_cap": 12,
+    "plan_detail": "balanced",
+    "tool_selection": "hints",
+    "verify_cadence": "final",
+    "on_stage_failure": "abort"
+  },
+  "work_dir": "~/.local/share/salome-agent/runs",
+  "gui": {
+    "mode": "agent"
+  },
+  "rag": {
+    "_comment": "Documentation modes (gui.mode \"rag\" or \"rag_agentic\"): raglib answers questions from the SALOME HTML documentation. 'chatbot' and 'extraction' each follow raglib's own config.json schema (raglib/README.md). Relative paths are resolved against this file's directory; ~, $VAR and ${VAR:-fallback} are expanded (SALOME's environment sets $DOCUMENTATION_ROOT_DIR and $<MODULE>_ROOT_DIR).",
+
+    "chatbot": {
+      "project_name": "salome",
+      "_comment_project_name": "No spaces: names the ChromaDB collection. Must match extraction.project_name.",
+
+      "chromadb_path": "~/.local/share/salome-agent/rag/salome_docs_extracted/chromadb",
+      "_comment_chromadb_path": "Must be extraction.output_dir + '/chromadb'.",
+
+      "_comment_llm": "No 'llm' block: the shared llm.base_url / model / api_key / ssl_cert_file above are used. Add {\"llm\": {\"model\": \"...\"}} here to override any of them for the documentation modes only.",
+
+      "embedding": {
+        "model": "all-MiniLM-L6-v2",
+        "type": "local",
+        "base_url": null,
+        "api_key": null,
+        "_comment": "'local' runs sentence-transformers here; 'api' uses an OpenAI-compatible embeddings endpoint. Must stay identical to extraction.embedding."
+      },
+
+      "reranker": {
+        "model": "answerdotai/answerai-colbert-small-v1",
+        "type": "late_interaction"
+      },
+      "_comment_reranker": "null disables reranking. Alternative: {\"model\": \"BAAI/bge-reranker-v2-m3\", \"type\": \"cross_encoder\"}.",
+
+      "agentic": {
+        "page_index_path": "~/.local/share/salome-agent/rag/salome_docs_extracted/page_index.json",
+        "max_chars_per_page": 8000,
+        "max_steps": 20,
+        "debug": false,
+        "section_top_n": 5,
+        "section_char_budget": 15000
+      },
+      "_comment_agentic": "Needed by the agentic RAG mode only. page_index.json is written by the index build (extraction.output_dir).",
+
+      "k_standard": 40,
+      "k_deep_dive": 60,
+      "k_retrieve": null,
+      "deep_dive_batch_size": 10,
+      "top_n_after_rerank": 15,
+      "expansion_char_budget": 60000,
+      "temperature": 0.0,
+      "max_tokens": 5000,
+      "bm25_enabled": true,
+      "title_boost_enabled": true,
+      "hyde_enabled": false
+    },
+
+    "extraction": {
+      "project_name": "salome",
+      "output_dir": "~/.local/share/salome-agent/rag/salome_docs_extracted",
+      "use_token_chunking": false,
+
+      "embedding": {
+        "model": "all-MiniLM-L6-v2",
+        "type": "local",
+        "base_url": null,
+        "api_key": null
+      },
+
+      "_comment_modules": "Documentation of the SALOME being used, found through its environment: $DOCUMENTATION_ROOT_DIR (the DOCUMENTATION module, which gathers every module's docs), else each module's own $<MODULE>_ROOT_DIR. Both are set by SALOME (env_launch.sh, salome shell) and kept by the plugin; outside SALOME export DOCUMENTATION_ROOT_DIR=<SALOME>/INSTALL/DOCUMENTATION. ${VAR:-fallback} is the shell's syntax; absolute and relative paths work too. dev_path = API reference (tui), user_path = user guide (gui); a path that does not exist is skipped. No _comment key inside modules itself.",
+      "modules": {
+        "GEOM": {
+          "description": "Geometry module: CAD construction and manipulation.",
+          "dev_path": "${DOCUMENTATION_ROOT_DIR:-$GEOM_ROOT_DIR}/share/doc/salome/tui/GEOM",
+          "user_path": "${DOCUMENTATION_ROOT_DIR:-$GEOM_ROOT_DIR}/share/doc/salome/gui/GEOM",
+          "url_for_sources_citation": {
+            "dev": "https://docs.salome-platform.org/latest/tui/GEOM",
+            "user": "https://docs.salome-platform.org/latest/gui/GEOM"
+          }
+        },
+        "SHAPER": {
+          "description": "SHAPER: parametric, feature-based CAD modeler.",
+          "dev_path": "${DOCUMENTATION_ROOT_DIR:-$SHAPER_ROOT_DIR}/share/doc/salome/tui/SHAPER",
+          "user_path": "${DOCUMENTATION_ROOT_DIR:-$SHAPER_ROOT_DIR}/share/doc/salome/gui/SHAPER",
+          "url_for_sources_citation": {
+            "dev": "https://docs.salome-platform.org/latest/tui/SHAPER",
+            "user": "https://docs.salome-platform.org/latest/gui/SHAPER"
+          }
+        },
+        "SMESH": {
+          "description": "Mesh module: meshing algorithms and mesh editing.",
+          "dev_path": "${DOCUMENTATION_ROOT_DIR:-$SMESH_ROOT_DIR}/share/doc/salome/tui/SMESH",
+          "user_path": "${DOCUMENTATION_ROOT_DIR:-$SMESH_ROOT_DIR}/share/doc/salome/gui/SMESH",
+          "url_for_sources_citation": {
+            "dev": "https://docs.salome-platform.org/latest/tui/SMESH",
+            "user": "https://docs.salome-platform.org/latest/gui/SMESH"
+          }
+        }
+      },
+
+      "chunking": {
+        "max_tokens": 384,
+        "overlap_tokens": 50,
+        "char_chunk_size": 1000,
+        "char_overlap": 200
+      },
+
+      "quality": {
+        "min_score": 0.3,
+        "min_word_count": 50,
+        "substantial_word_count": 100
+      }
+    }
+  }
+}

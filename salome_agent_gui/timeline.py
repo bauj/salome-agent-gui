@@ -49,6 +49,8 @@ class RunView:
     reasoning: dict[str, list[dict]] = field(default_factory=dict)
     # the image-reading step: None until vision_start (see _vision_view)
     vision: dict | None = None
+    # a documentation-mode answer (rag_worker): None in the agent mode
+    rag: dict | None = None
     usage_base: dict | None = None
     clock: Callable[[], float] = field(default=time.time, repr=False)
     batch: bool = False
@@ -134,13 +136,25 @@ class RunView:
             self.vision.update(status="conflicts" if conflicts else "done",
                                parts=d.get("parts"), conflicts=conflicts,
                                elapsed_s=d.get("seconds"))
+        elif kind == "rag_status":
+            self.rag = {"status": "running", "phase": str(d.get("phase") or "searching"),
+                        "agentic": bool(d.get("agentic")), "answer": "", "sources": [], "usage": None, "degraded": False,
+                        "steps": None, "seconds": None}
+        elif kind == "rag_answer" and self.rag:
+            self.rag.update(status="done", answer=str(d.get("answer") or ""),
+                            sources=[dict(s) for s in d.get("sources") or []],
+                            usage=dict(d["usage"]) if isinstance(d.get("usage"), dict) else None,
+                            degraded=bool(d.get("degraded")), steps=d.get("steps"),
+                            seconds=d.get("seconds"))
         elif kind == "fatal":
             self.fatal = d.get("message")
             self._end_vision("failed", d.get("message"))
+            self._end_rag("failed")
         elif kind == "aborted":
             self.aborted = True
             self.finished = True
             self._end_vision("stopped")
+            self._end_rag("stopped")
             self._stop_clock()
 
     def _stop_clock(self) -> None:
@@ -150,6 +164,10 @@ class RunView:
     def _end_vision(self, status: str, error=None) -> None:
         if self.vision and self.vision["status"] == "running":
             self.vision.update(status=status, error=error)
+
+    def _end_rag(self, status: str) -> None:
+        if self.rag and self.rag["status"] == "running":
+            self.rag["status"] = status
 
     def _vision_view(self) -> dict | None:
         if self.vision is None:
@@ -232,6 +250,8 @@ class RunView:
             "reasoning": {k: _calls(v) for k, v in self.reasoning.items()
                           if not k.startswith("stage:") and k != "vision"},
             "vision": self._vision_view(),
+            "rag": (dict(self.rag, sources=[dict(s) for s in self.rag["sources"]])
+                    if self.rag else None),
         }
 
 

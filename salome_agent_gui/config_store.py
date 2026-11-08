@@ -3,8 +3,11 @@
 import base64
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
+
+from salome_agent_gui import rag_backend, rag_models
 
 USER_CONFIG = Path.home() / ".config" / "salome" / "salome-agent.json"
 # which config file the GUI uses and the chat window geometry; kept outside the config
@@ -104,9 +107,12 @@ def save_key_fields(path: Path, fields: dict) -> None:
 
 
 def load(path: Path) -> dict:
+    """The engine's checks, then raglib's on the `rag` section if there is one."""
     from salome_agent.config import load_config
 
-    return load_config(str(path))
+    config = load_config(str(path))
+    rag_backend.check(config, path)
+    return config
 
 
 def save_raw(path: Path, text: str) -> None:
@@ -119,6 +125,8 @@ def save_raw(path: Path, text: str) -> None:
 
 
 THEMES = ("system", "light", "dark")
+# gui.mode: the SALOME Agent, or a documentation chatbot
+MODES = rag_backend.MODES
 ON_FAILURE = ("abort", "continue")
 TOOL_SELECTION = ("hints", "all")
 VERIFY_CADENCE = ("none", "final", "strict")
@@ -134,6 +142,20 @@ ROW_KEYS = ("model", "base_url", "api_key", "ssl_cert_file")
 JSON_ONLY = {"extra_headers", "extra_body", "module_extra_body", "json_retries", "max_retries",
              "temperature", "carry_reasoning", "loop_retries", "text_tool_calls"}
 MODULE_JSON_ONLY = {"extra_headers", "extra_body", "temperature", "timeout"}
+
+
+# documentation-mode knobs the form edits, all in rag.chatbot (raglib's schema);
+# ints: (default, min, max), defaults are raglib's
+RAG_INTS = {"k_standard": (40, 1, 500), "top_n_after_rerank": (15, 1, 200),
+            "expansion_char_budget": (60000, 0, 1000000), "max_tokens": (2000, 64, 64000)}
+RAG_BOOLS = {"bm25_enabled": True, "title_boost_enabled": True, "hyde_enabled": False}
+TEMPERATURE = (0.0, 0.0, 2.0)
+# rag.chatbot.agentic, used by the agentic RAG mode only
+AGENTIC_INTS = {"max_steps": (20, 1, 100), "max_chars_per_page": (8000, 500, 200000),
+                "section_top_n": (5, 1, 50), "section_char_budget": (15000, 1000, 500000)}
+# where the reranker block waits while reranking is off (raglib skips `_` keys)
+RERANKER_PARKED = "_reranker_off"
+DEFAULT_RERANKER = {"model": "answerdotai/answerai-colbert-small-v1", "type": "late_interaction"}
 
 
 def _section(data, name: str) -> dict:
@@ -219,6 +241,215 @@ def _save_modules(data: dict, shared: bool, rows) -> None:
             llm["modules"] = store
 
 
+def _float(value, table) -> float:
+    default, lo, hi = table
+    if isinstance(value, bool):
+        return default
+    try:
+        return max(lo, min(hi, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _rag_options(data: dict) -> dict:
+    """The documentation-mode knobs, from rag.chatbot; raglib's defaults when unset."""
+    chatbot = _section(_section(data, "rag"), "chatbot")
+    agentic = _section(chatbot, "agentic")
+    return {
+        **{k: _clamped(chatbot, k, RAG_INTS) for k in RAG_INTS},
+        **{k: bool(chatbot.get(k, d)) for k, d in RAG_BOOLS.items()},
+        "temperature": _float(chatbot.get("temperature"), TEMPERATURE),
+        "reranker": bool(chatbot.get("reranker")),
+        **{k: _clamped(agentic, k, AGENTIC_INTS) for k in AGENTIC_INTS},
+    }
+
+
+def _default_chatbot() -> dict:
+    try:
+        chatbot = rag_backend.default_rag().get("chatbot")
+    except (OSError, ValueError, KeyError, AttributeError):
+        return {}
+    return chatbot if isinstance(chatbot, dict) else {}
+
+
+def _save_rag_options(data: dict, opts: dict) -> None:
+    """Into rag.chatbot, keeping every key the form does not show. A config
+    without a rag section gets the example's first."""
+    if not isinstance(data.get("rag"), dict):
+        data["rag"] = rag_backend.default_rag()
+    rag = data["rag"]
+    if not isinstance(rag.get("chatbot"), dict):
+        rag["chatbot"] = _default_chatbot()
+    chatbot = rag["chatbot"]
+    for key, (_, lo, hi) in RAG_INTS.items():
+        value = _int(opts.get(key))
+        if value is not None:
+            chatbot[key] = max(lo, min(hi, value))
+    for key in RAG_BOOLS:
+        if isinstance(opts.get(key), bool):
+            chatbot[key] = opts[key]
+    if "temperature" in opts and not isinstance(opts["temperature"], bool):
+        try:
+            chatbot["temperature"] = max(TEMPERATURE[1], min(TEMPERATURE[2], float(opts["temperature"])))
+        except (TypeError, ValueError):
+            pass
+    if isinstance(opts.get("reranker"), bool):
+        current = chatbot.get("reranker")
+        if opts["reranker"] and not current:
+            parked = chatbot.pop(RERANKER_PARKED, None)
+            chatbot["reranker"] = (parked if isinstance(parked, dict) and parked
+                                   else _default_chatbot().get("reranker") or dict(DEFAULT_RERANKER))
+        elif not opts["reranker"] and current:
+            chatbot[RERANKER_PARKED] = current
+            chatbot["reranker"] = None
+    if any(_int(opts.get(k)) is not None for k in AGENTIC_INTS):
+        if not isinstance(chatbot.get("agentic"), dict):
+            default = _default_chatbot().get("agentic")
+            chatbot["agentic"] = dict(default) if isinstance(default, dict) else {}
+        agentic = chatbot["agentic"]
+        for key, (_, lo, hi) in AGENTIC_INTS.items():
+            value = _int(opts.get(key))
+            if value is not None:
+                agentic[key] = max(lo, min(hi, value))
+
+
+# ---- documentation sources: rag.extraction.modules -----------------------
+# a source's name is raglib's module name (metadata, filters); `_` would make it a comment
+SOURCE_NAME = re.compile(r"[A-Za-z0-9][\w.+-]*")
+SOURCE_PATHS = (("dev", "dev_path"), ("user", "user_path"))
+
+
+def _citations(value) -> tuple[str, str]:
+    """url_for_sources_citation (one URL, or {"dev", "user"}) as (dev, user)."""
+    if isinstance(value, dict):
+        return str(value.get("dev") or ""), str(value.get("user") or "")
+    return (str(value or ""),) * 2
+
+
+def _path_state(raw: str, base_dir: Path) -> dict:
+    """Where a source path points here: ok, missing, or unset (variables not set)."""
+    if not raw:
+        return {"state": "empty", "resolved": "", "vars": []}
+    unset = rag_backend.unset_vars(raw)
+    resolved = str(rag_backend._abspath(raw, base_dir))
+    if unset:
+        return {"state": "unset", "resolved": resolved, "vars": unset}
+    return {"state": "ok" if Path(resolved).is_dir() else "missing", "resolved": resolved, "vars": []}
+
+
+def _doc_sources(data: dict, path) -> list[dict]:
+    """rag.extraction.modules as the settings' rows, each path with its state."""
+    extraction = _section(_section(data, "rag"), "extraction")
+    modules = extraction.get("modules") if isinstance(extraction.get("modules"), dict) else {}
+    base_dir = Path(path).resolve().parent
+    rows = []
+    for name, m in modules.items():
+        if str(name).startswith("_") or not isinstance(m, dict):
+            continue
+        dev, user = _citations(m.get("url_for_sources_citation"))
+        row = {"name": str(name), "description": str(m.get("description") or ""),
+               "cite_dev": dev, "cite_user": user,
+               "json_only": sorted(k for k in m if not k.startswith("_") and k not in SOURCE_KEYS)}
+        for short, key in SOURCE_PATHS:
+            row[key] = str(m.get(key) or "")
+            row[f"{short}_state"] = _path_state(row[key], base_dir)
+        rows.append(row)
+    return rows
+
+
+SOURCE_KEYS = {"description", "dev_path", "user_path", "url_for_sources_citation"}
+
+
+def _save_doc_sources(data: dict, rows) -> None:
+    """The settings' rows into rag.extraction.modules, in their order. Keys the
+    form does not show (methodology_path, comments...) stay with their source,
+    also across a rename (`orig`). Raises ValueError on a bad or repeated name."""
+    if not isinstance(rows, list):
+        return
+    if not isinstance(data.get("rag"), dict):
+        data["rag"] = rag_backend.default_rag()
+    rag = data["rag"]
+    if not isinstance(rag.get("extraction"), dict):
+        rag["extraction"] = rag_backend.default_rag().get("extraction") or {}
+    extraction = rag["extraction"]
+    old = extraction.get("modules") if isinstance(extraction.get("modules"), dict) else {}
+    modules = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = {k: str(row.get(k) or "").strip() for k in
+                ("name", "orig", "description", "dev_path", "user_path", "cite_dev", "cite_user")}
+        name = text["name"]
+        if not name and not any(text[k] for k in ("description", "dev_path", "user_path")):
+            continue                                   # a blank row the user added
+        if not SOURCE_NAME.fullmatch(name):
+            raise ValueError(f"documentation source name {name!r}: use letters, digits, _ . + -")
+        if name in modules:
+            raise ValueError(f"documentation source {name!r} is listed twice")
+        kept = old.get(text["orig"] or name)
+        module = {k: v for k, v in kept.items() if k not in SOURCE_KEYS} if isinstance(kept, dict) else {}
+        if text["description"]:
+            module["description"] = text["description"]
+        for _, key in SOURCE_PATHS:
+            if text[key]:
+                module[key] = text[key]
+        dev, user = text["cite_dev"], text["cite_user"]
+        if dev and user and dev != user:
+            module["url_for_sources_citation"] = {"dev": dev, "user": user}
+        elif dev or user:
+            module["url_for_sources_citation"] = dev or user
+        modules[name] = module
+    extraction["modules"] = modules
+
+
+def _save_rag_models(data: dict, fields: dict) -> None:
+    """The Models section: the embedding model into both rag.chatbot.embedding
+    and rag.extraction.embedding (raglib: they must stay identical), the
+    reranker into rag.chatbot.reranker, or where it is parked while off."""
+    if not isinstance(data.get("rag"), dict):
+        data["rag"] = rag_backend.default_rag()
+    rag = data["rag"]
+    if not isinstance(rag.get("chatbot"), dict):
+        rag["chatbot"] = {}
+    chatbot = rag["chatbot"]
+    emb = str(fields.get("embedding_model") or "").strip()
+    if emb:
+        for section in (chatbot, rag.setdefault("extraction", {})):
+            if not isinstance(section.get("embedding"), dict):
+                section["embedding"] = {"model": emb, "type": "local", "base_url": None, "api_key": None}
+            section["embedding"]["model"] = emb
+    model = str(fields.get("reranker_model") or "").strip()
+    kind = fields.get("reranker_type")
+    if model or kind in rag_models.RERANKER_TYPES:
+        target = chatbot.get("reranker")
+        if not (isinstance(target, dict) and target):
+            target = chatbot.get(RERANKER_PARKED)
+            if not isinstance(target, dict):
+                target = chatbot[RERANKER_PARKED] = dict(DEFAULT_RERANKER)
+        if model:
+            target["model"] = model
+        if kind in rag_models.RERANKER_TYPES:
+            target["type"] = kind
+
+
+def complete_config(path: Path) -> bool:
+    """Give a config seeded before the documentation modes the example's rag
+    section, so one file holds the settings of every mode. An explicit
+    `"rag": null` is left alone. True when the file was changed."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or "rag" in data:
+        return False
+    try:
+        data["rag"] = rag_backend.default_rag()
+        _write(Path(path), data)
+    except (OSError, ValueError, KeyError):
+        return False
+    return True
+
+
 def model_label(settings: dict) -> tuple[str, str]:
     """The model part of the header, and a tooltip listing each override."""
     shared = settings.get("model") or "?"
@@ -251,6 +482,7 @@ def read_settings(path: Path) -> dict:
         "batch": bool(gui.get("batch", False)),
         "verbose": _verbose(gui.get("verbose")),
         "theme": gui.get("theme") if gui.get("theme") in THEMES else "system",
+        "mode": gui.get("mode") if gui.get("mode") in MODES else "agent",
         "show_reasoning": bool(gui.get("show_reasoning", False)),
         "verify_cadence": policy.get("verify_cadence") if policy.get("verify_cadence") in VERIFY_CADENCE else "final",
         "plan_detail": policy.get("plan_detail") if policy.get("plan_detail") in PLAN_DETAIL else "balanced",
@@ -260,6 +492,9 @@ def read_settings(path: Path) -> dict:
         "modules_json_only": {name: sorted(set(d) - set(ROW_KEYS))
                               for name, d in shown.items() if set(d) - set(ROW_KEYS)},
         **{k: _clamped(llm, k, LLM_INTS) for k in LLM_INTS},
+        "rag_options": _rag_options(data if isinstance(data, dict) else {}),
+        "doc_sources": _doc_sources(data if isinstance(data, dict) else {}, path),
+        "rag_models": rag_models.models_view(data if isinstance(data, dict) else {}),
     }
 
 
@@ -294,8 +529,20 @@ def save_settings(path: Path, fields: dict, *, run_options: bool = True) -> None
                 data["llm"][key] = max(lo, min(hi, value))
         if "shared_model" in fields:
             _save_modules(data, bool(fields["shared_model"]), fields.get("modules"))
+        if fields.get("mode") in MODES:
+            gui["mode"] = fields["mode"]
+            if fields["mode"] in rag_backend.DOC_MODES and data.get("rag") is None:
+                # a config seeded before the documentation modes: start from the example's
+                data["rag"] = rag_backend.default_rag()
+        if isinstance(fields.get("rag_options"), dict):
+            _save_rag_options(data, fields["rag_options"])
+        if isinstance(fields.get("rag_models"), dict):
+            _save_rag_models(data, fields["rag_models"])
         if "batch" in fields:
             gui["batch"] = bool(fields["batch"])
         if "verbose" in fields:
             gui["verbose"] = max(0, min(2, int(fields["verbose"])))
+    # what the index build reads, not an open conversation: saved at any time
+    if "doc_sources" in fields:
+        _save_doc_sources(data, fields["doc_sources"])
     _write(Path(path), data)

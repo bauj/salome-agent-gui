@@ -32,9 +32,16 @@ def test_window_alive_rejects_a_recycled_pid(tmp_path):
     assert not sl.window_alive(p)
 
 
-def test_pid_path_lives_in_the_salome_agent_data_dir():
+def test_pid_path_lives_in_the_salome_agent_data_dir(monkeypatch):
     from pathlib import Path
-    assert sl.pid_path() == Path.home() / ".local" / "share" / "salome-agent" / "salome-agent-gui.pid"
+
+    from salome_agent_gui import main_window
+
+    monkeypatch.undo()                      # the real paths, not conftest's tmp ones
+    data = Path.home() / ".local" / "share" / "salome-agent"
+    assert sl.pid_path() == data / "salome-agent-gui.pid"
+    # the window reads what the menu writes
+    assert sl.request_path() == main_window.request_path()
 
 
 def test_ensure_server_reuses_a_running_server():
@@ -112,7 +119,10 @@ def test_run_with_live_window_does_not_spawn(monkeypatch, tmp_path):
     monkeypatch.setattr(sl, "pid_path", lambda: p)
     monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
-    assert "already open" in sl.run("ctx")
+    assert sl.run("ctx") == ""
+    assert json.loads(sl.request_path().read_text()) == {"family": ""}
+    assert sl.run("ctx", "agent") == ""
+    assert json.loads(sl.request_path().read_text()) == {"family": "agent"}
 
 
 def test_ensure_server_returns_foreign_when_launch_declines():
@@ -142,3 +152,22 @@ def test_run_on_foreign_server_without_owner_details_falls_back(monkeypatch):
     monkeypatch.setattr(handshake, "live_owner", lambda: None)
     msg = sl.run("ctx")
     assert "Messages window" in msg
+
+
+# ---- the AI tools menu ----------------------------------------------------------
+def test_run_opens_the_window_on_the_menu_family(monkeypatch, tmp_path):
+    monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "started")
+    monkeypatch.setenv("SALOME_AGENT_GUI", "/x/salome-agent-gui.sh")
+    seen = []
+    monkeypatch.setattr(sl, "launch_window", lambda launcher, path, **kw: seen.append(kw["args"]))
+    for family in ("agent", "rag", None, "bogus"):
+        assert sl.run("ctx", family) == ""
+    assert seen == [("--mode", "agent"), ("--mode", "rag"), (), ()]
+
+
+def test_run_rag_needs_no_agent_server(monkeypatch):
+    monkeypatch.setattr(sl, "ensure_server", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
+    monkeypatch.setattr(sl, "launch_window", lambda *a, **k: None)
+    assert sl.run("ctx", "rag") == ""
+

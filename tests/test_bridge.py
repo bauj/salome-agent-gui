@@ -120,7 +120,9 @@ def test_first_message_opens_a_conversation_and_stays_open(qtbot, bridges, cfg_p
     assert last["files"] == {"result_py": "/w/result.py", "report_md": "/w/report.md"}
     assert b.worker is not None
     assert p.last("setBusy") == {"busy": False, "stopping": False, "open": True,
-                                 "degraded": False, "can_send": True}
+                                 "degraded": False, "doc": False, "mode": "agent",
+                                 "can_switch_mode": False, "can_send": True,
+                                 "modes": ["rag", "rag_agentic", "agent"]}
 
 
 def test_saved_run_options_reach_the_conversation(qtbot, bridges, cfg_path):
@@ -674,3 +676,54 @@ def test_note_before_the_page_is_ready_is_replayed(bridges, cfg_path):
     b.ready()
     items = p.last("replay")["items"]
     assert {"type": "note", "text": "Last loaded config /x.json not found"} in items
+
+
+# ---- the SALOME menu's families of modes (Tools > Plugins > AI tools) ----------
+def _saved_mode(cfg_path):
+    from salome_agent_gui import config_store
+    return config_store.read_settings(cfg_path)["mode"]
+
+
+def test_a_family_limits_the_modes_and_enters_its_own(qtbot, bridges, cfg_path):
+    from salome_agent_gui import config_store
+    config_store.save_settings(cfg_path, {"mode": "agent"})
+    b, p = make(bridges, cfg_path, {}, family="rag")
+    b.start()
+    assert _saved_mode(cfg_path) == "rag"              # entered the family's first mode
+    s = p.last("setSettings")
+    assert s["mode_order"] == ["rag", "rag_agentic"] and s["family"] == "rag"
+    assert p.last("setBusy")["modes"] == ["rag", "rag_agentic"]
+    b.setMode("agent")                                 # not offered by this window
+    assert _saved_mode(cfg_path) == "rag"
+    b.setMode("rag_agentic")
+    assert _saved_mode(cfg_path) == "rag_agentic"
+    b.saveSettings(json.dumps({"mode": "agent"}))      # nor through the drawer
+    assert _saved_mode(cfg_path) == "rag_agentic"
+
+
+def test_an_agent_window_keeps_a_doc_mode_out(qtbot, bridges, cfg_path):
+    from salome_agent_gui import config_store
+    config_store.save_settings(cfg_path, {"mode": "rag_agentic"})
+    b, p = make(bridges, cfg_path, {}, family="agent")
+    b.start()
+    assert _saved_mode(cfg_path) == "agent"
+    assert p.last("setSettings")["mode_order"] == ["agent"]
+
+
+def test_the_menu_moves_an_open_window_to_another_family(qtbot, bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {}, family="agent")
+    b.start()
+    assert b.set_family("rag")
+    assert b.family == "rag" and _saved_mode(cfg_path) == "rag"
+    assert p.last("setBusy")["modes"] == ["rag", "rag_agentic"]
+    assert b.set_family("agent") and _saved_mode(cfg_path) == "agent"
+
+
+def test_an_agent_conversation_keeps_the_window_on_its_family(qtbot, bridges, cfg_path):
+    rec = {}
+    b, p = make(bridges, cfg_path, rec, family="agent")
+    b.start()
+    first_turn(qtbot, b, p)
+    assert not b.set_family("rag")
+    assert b.family == "agent" and _saved_mode(cfg_path) == "agent"
+    assert "New conversation" in json.dumps(p.items[-5:])

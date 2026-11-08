@@ -3,6 +3,20 @@
 import sys
 
 
+def split_family(argv: list) -> tuple[str | None, list]:
+    """`--mode agent|rag` (the SALOME menu entry, see sagui_launcher) out of
+    argv; the rest goes to Qt."""
+    family, rest, it = None, [], iter(argv)
+    for a in it:
+        if a == "--mode":
+            family = next(it, None)
+        elif a.startswith("--mode="):
+            family = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+    return family, rest
+
+
 def main(argv=None) -> int:
     from PyQt5.QtCore import QCoreApplication, Qt
 
@@ -22,9 +36,11 @@ def main(argv=None) -> int:
 
     setup_logging(0)
     path, notice = config_store.startup_config(config_store.ensure_user_config())
-    app = QApplication(sys.argv if argv is None else argv)
-    app.setApplicationName("SALOME Agent")
-    window = MainWindow(path, notice=notice)
+    config_store.complete_config(path)          # one file for every mode's settings
+    family, qt_argv = split_family(list(sys.argv if argv is None else argv))
+    app = QApplication(qt_argv)
+    app.setApplicationName("SALOME agentic assistants")
+    window = MainWindow(path, notice=notice, family=family)
     window.show()
     return app.exec_()
 

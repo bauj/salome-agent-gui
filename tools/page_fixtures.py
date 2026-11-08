@@ -63,6 +63,14 @@ class FakeBridge(QObject):
     def reconnect(self):
         self.calls.append(("reconnect",))
 
+    @pyqtSlot(str)
+    def openLink(self, target):
+        self.calls.append(("openLink", target))
+
+    @pyqtSlot()
+    def buildIndex(self):
+        self.calls.append(("buildIndex",))
+
 
 def _stage(index, module, intent, **kw):
     s = {"index": index, "module": module, "icon": None, "intent": intent, "status": "pending",
@@ -89,11 +97,16 @@ USER_3 = "add a spoiler on the back and mesh everything"
 
 SETTINGS = {"base_url": "http://llm.example/v1", "model": "auto", "api_key": "sk-test",
             "ssl_cert_file": "~/certs/ca.pem", "on_stage_failure": "abort", "tool_selection": "hints", "batch": False,
-            "verbose": 0, "theme": "system", "locked": False,
+            "verbose": 0, "theme": "system", "locked": False, "active_mode": "agent", "can_switch_mode": True,
             "config_path": "~/.config/salome/salome-agent.json",
             "shared_model": True, "modules": {}, "modules_json_only": {},
             "module_names": ["planner", "vision", "geom", "smesh", "amend"],
-            "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120}
+            "reasoning_budget": 20000, "vision_fix_retries": 2, "timeout": 120,
+            "rag_options": {"k_standard": 40, "top_n_after_rerank": 15, "expansion_char_budget": 60000,
+                            "max_tokens": 5000, "bm25_enabled": True, "title_boost_enabled": True,
+                            "hyde_enabled": False, "temperature": 0.0, "reranker": True,
+                            "max_steps": 20, "max_chars_per_page": 8000, "section_top_n": 5,
+                            "section_char_budget": 15000}}
 MODELS_SETTINGS = dict(SETTINGS, shared_model=False, modules={
     "vision": {"model": "drawing-reader", "base_url": "http://reader.example/v1",
                "api_key": "sk-reader", "ssl_cert_file": ""},
@@ -101,11 +114,80 @@ MODELS_SETTINGS = dict(SETTINGS, shared_model=False, modules={
     modules_json_only={"vision": ["extra_body"]})
 STATUS_OK = {"state": "connected", "label": "GUI :46019 · auto", "detail": ""}
 STATUS_OFF = {"state": "offline", "label": "Not connected",
-              "detail": "No agent server. Start it from Tools > Plugins > SALOME Agent in the "
+              "detail": "No agent server. Start it from Tools > Plugins > AI tools > SALOME agent in the "
                         "SALOME window, then press Reconnect in the settings."}
-IDLE_NEW = {"busy": False, "stopping": False, "open": False, "degraded": False, "can_send": True}
-IDLE_OPEN = {"busy": False, "stopping": False, "open": True, "degraded": False, "can_send": True}
-BUSY = {"busy": True, "stopping": False, "open": True, "degraded": False, "can_send": False}
+IDLE_NEW = {"busy": False, "stopping": False, "open": False, "degraded": False, "can_send": True,
+            "mode": "agent", "can_switch_mode": True}
+IDLE_OPEN = {"busy": False, "stopping": False, "open": True, "degraded": False, "can_send": True,
+             "mode": "agent", "can_switch_mode": False}
+BUSY = {"busy": True, "stopping": False, "open": True, "degraded": False, "can_send": False,
+        "mode": "agent", "can_switch_mode": False}
+
+DOC_RAG = {"configured": True, "index": "~/.local/share/salome-agent/rag/salome_docs_extracted/chromadb",
+           "index_exists": True, "agentic": True, "building": False, "line": ""}
+DOC_ROOT = "/opt/SALOME-9.16.0/INSTALL/DOCUMENTATION/share/doc/salome"
+DOC_SOURCES = [
+    {"name": m, "description": d, "dev_path": f"${{DOCUMENTATION_ROOT_DIR:-${m}_ROOT_DIR}}/share/doc/salome/tui/{m}",
+     "user_path": f"${{DOCUMENTATION_ROOT_DIR:-${m}_ROOT_DIR}}/share/doc/salome/gui/{m}",
+     "cite_dev": f"https://docs.salome-platform.org/latest/tui/{m}",
+     "cite_user": f"https://docs.salome-platform.org/latest/gui/{m}", "json_only": [],
+     "dev_state": {"state": "ok", "resolved": f"{DOC_ROOT}/tui/{m}", "vars": []},
+     "user_state": {"state": "ok", "resolved": f"{DOC_ROOT}/gui/{m}", "vars": []}}
+    for m, d in (("GEOM", "Geometry module: CAD construction and manipulation."),
+                 ("SMESH", "Mesh module: meshing algorithms and mesh editing."))]
+DOC_SOURCES.append({"name": "MYDOCS", "description": "", "dev_path": "", "user_path": "$MYDOCS_ROOT/html",
+                    "cite_dev": "", "cite_user": "", "json_only": ["methodology_path"],
+                    "dev_state": {"state": "empty", "resolved": "", "vars": []},
+                    "user_state": {"state": "unset", "resolved": "$MYDOCS_ROOT/html", "vars": ["MYDOCS_ROOT"]}})
+DOC_MODELS = {
+    "embedding": {"model": "all-MiniLM-L6-v2", "type": "local",
+                  "status": {"state": "installed", "repo": "sentence-transformers/all-MiniLM-L6-v2",
+                             "path": "~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2",
+                             "size": "87.3 MB"}},
+    "reranker": {"model": "BAAI/bge-reranker-v2-m3", "type": "cross_encoder", "enabled": True,
+                 "status": {"state": "missing", "repo": "BAAI/bge-reranker-v2-m3",
+                            "path": "~/.cache/huggingface/hub/models--BAAI--bge-reranker-v2-m3", "size": ""}},
+    "cache": "~/.cache/huggingface/hub",
+    "choices": {"embedding": [{"model": "all-MiniLM-L6-v2", "note": "small and fast"}],
+                "reranker": [{"model": "answerdotai/answerai-colbert-small-v1", "type": "late_interaction",
+                              "note": "ColBERT"},
+                             {"model": "BAAI/bge-reranker-v2-m3", "type": "cross_encoder", "note": "cross-encoder"}]}}
+DOC_SETTINGS = dict(SETTINGS, mode="rag_agentic", active_mode="rag_agentic", rag=DOC_RAG,
+                    doc_sources=DOC_SOURCES, rag_models=DOC_MODELS)
+DOC_STATUS = {"state": "connected", "label": "Agentic RAG · auto", "detail": ""}
+DOC_IDLE = dict(IDLE_NEW, doc=True, mode="rag_agentic")
+DOC_BUSY = dict(BUSY, doc=True, mode="rag_agentic")
+DOC_QUESTION = "How do I set a local mesh size on a face in SMESH?"
+DOC_ANSWER = """Use a **local hypothesis** on a sub-mesh of that face:
+
+1. Create the mesh on the whole shape with a global size.
+2. Add a sub-mesh on the face and give it its own `NETGEN 2D Parameters`, or a
+   *Max. Element Area* hypothesis.
+
+```python
+face_mesh = mesh.Triangle(algo=smeshBuilder.NETGEN_2D, geom=face)
+params = face_mesh.Parameters()
+params.SetMaxSize(2.0)
+mesh.Compute()
+```
+
+> The sub-mesh wins over the global hypothesis on that face only.
+
+See [Constructing sub-meshes](https://docs.salome-platform.org/latest/gui/SMESH/constructing_submeshes.html)."""
+DOC_SOURCES = [
+    {"title": "Constructing sub-meshes", "module": "SMESH", "category": "user",
+     "url": "https://docs.salome-platform.org/latest/gui/SMESH/constructing_submeshes.html", "path": ""},
+    {"title": "NETGEN 2D Parameters", "module": "SMESH", "category": "user",
+     "url": "https://docs.salome-platform.org/latest/gui/SMESH/netgen_2d_3d_hypo.html", "path": ""},
+    {"title": "smeshBuilder.Mesh", "module": "SMESH", "category": "dev", "url": "",
+     "path": "/opt/salome/SMESH/share/doc/salome/tui/SMESH/classsmeshBuilder_1_1Mesh.html"}]
+
+
+def _doc_rag(**kw):
+    return {"status": "done", "phase": "searching", "agentic": True, "answer": DOC_ANSWER,
+            "sources": DOC_SOURCES, "usage": {"input_tokens": 18400, "output_tokens": 410},
+            "degraded": False, "steps": 9, "seconds": 21.4, **kw}
+
 
 DONE_VM = _vm(0, status="ok", stages=[
     _stage(0, "geom", BODY, status="ok", attempts=1, elapsed_s=12.0, objects=["fuse_1"]),
@@ -227,11 +309,46 @@ STATES = {
 }
 
 
+DOC_VM = _vm(0, status="ok", elapsed_s=21.4, rag=_doc_rag())
+DOC_BASE = [("setSettings", DOC_SETTINGS), ("setStatus", DOC_STATUS)]
+STATES.update({
+    "doc-empty": DOC_BASE + [("setBusy", DOC_IDLE)],
+    "doc-running": DOC_BASE + [("setBusy", DOC_BUSY), ("addUser", {"text": DOC_QUESTION}),
+                               ("renderTurn", "doc-running")],
+    "doc-answer": DOC_BASE + [("setBusy", dict(DOC_IDLE, open=True)),
+                              ("addUser", {"text": DOC_QUESTION}), ("renderTurn", DOC_VM)],
+    "doc-settings": DOC_BASE + [("setBusy", DOC_IDLE),
+                                ("__js__", "document.body.classList.add('settings-open');"
+                                           "document.querySelector('.drawer-body').scrollTop = 0; true")],
+    "doc-settings-rag": [("setSettings", dict(DOC_SETTINGS, mode="rag", active_mode="rag")),
+                         ("setStatus", DOC_STATUS), ("setBusy", DOC_IDLE),
+                         ("__js__", "document.body.classList.add('settings-open');"
+                                    "document.querySelector('.drawer-body').scrollTop = 9999; true")],
+    "doc-settings-models": DOC_BASE + [
+        ("setBusy", DOC_IDLE),
+        ("__js__", "document.body.classList.add('settings-open');"
+                   "document.getElementById('set-emb-model').closest('div[data-modes]').scrollIntoView(); true")],
+    "doc-settings-downloading": DOC_BASE + [
+        ("setBusy", DOC_IDLE),
+        ("setIndex", {"building": True, "job": "models",
+                      "line": "Downloading the reranker model BAAI/bge-reranker-v2-m3…"}),
+        ("__js__", "document.body.classList.add('settings-open');"
+                   "document.getElementById('set-emb-model').closest('div[data-modes]').scrollIntoView(); true")],
+    "doc-settings-agentic-scrolled": DOC_BASE + [
+        ("setBusy", DOC_IDLE),
+        ("__js__", "document.body.classList.add('settings-open');"
+                   "document.querySelector('.drawer-body').scrollTop = 9999; true")],
+})
+
+
 def resolve(payload):
     """`running` is built at push time so its live timer starts near 0:24; the
     sketches need the QApplication."""
     if payload == "running":
         return running_vm()
+    if payload == "doc-running":
+        return _vm(0, status="running", started_at=time.time() - 6,
+                   rag=_doc_rag(status="running", answer="", sources=[], usage=None, steps=None))
     if payload == "vision-running":
         return vision_running_vm()
     if payload == "edit-running":
