@@ -53,7 +53,7 @@ else
 fi
 # -I: python -c would otherwise import the checkout when run from inside it.
 "$PREFIX/bin/python" -I -c \
-    'import salome_agent_gui.app; from salome_agent.graph import build_graph; build_graph(batch=True)' \
+    'import salome_agent_gui.app, salome_agent_gui.mcp_server, mcp.server.mcpserver; from salome_agent.graph import build_graph; build_graph(batch=True)' \
     || die "the installed salome-agent-gui does not import"
 if [ "$RAG" != 0 ]; then
     "$PREFIX/bin/python" -I -c \

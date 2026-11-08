@@ -67,12 +67,13 @@ and then meshing it in SMESH.
 ### Ask the documentation
 
 The same window can also answer questions about SALOME instead of building models. The plugin
-adds a **Tools > Plugins > AI tools** submenu with two entries:
+adds a **Tools > Plugins > AI tools** submenu with three entries:
 
 | Entry | What it opens |
 |---|---|
 | **SALOME agent** | The chat window as the **Agentic assistant**: it builds geometry and meshes in your study, as described above, and its settings are the agent's |
 | **Documentation (RAG)** | The chat window on the documentation, with a switch at the top between **Classical RAG** (one search, answers from the best passages) and **Agentic RAG** (the model searches and reads pages several times: slower, better at questions that span several pages) |
+| **MCP server** | A server that Claude Code, Gemini CLI, Antigravity (`agy`) or another MCP client connects to, and a small window with the commands that connect them: see [Use it from an MCP client](#use-it-from-claude-code-gemini-cli-or-claude-desktop-mcp) |
 
 There is one window: choosing the other entry while it is open moves it there, unless an Agentic
 assistant conversation is open (end it first with New conversation, since switching would lose
@@ -281,6 +282,64 @@ Every mode's settings live in that one file. A config file from before the docum
 gets the `rag` section from `salome_agent_gui/config.example.json` when the window starts
 (`"rag": null` is left alone). Turning the reranker off keeps its block under
 `rag.chatbot._reranker_off`, so turning it back on restores your model.
+
+## Use it from Claude Code, Gemini CLI or Claude Desktop (MCP)
+
+`salome-agent-mcp` gives Claude the SALOME Agent's tools through the
+[Model Context Protocol](https://modelcontextprotocol.io). Claude holds the conversation and
+does the planning under your own Claude plan (Pro included): nothing here calls a model, and
+no API key is needed. It talks to the agent server of the SALOME you have open, like the chat
+window does.
+
+| Tool | What it does |
+|---|---|
+| `list_cad_tools`, `describe_cad_tool`, `call_cad_tool` | The 132 GEOM, SHAPER and SMESH tools, with each module's guide |
+| `calc` | The engine's arithmetic sandbox |
+| `view_salome`, `list_study`, `show_objects`, `hide_objects`, `delete_objects` | Look at and tidy the study |
+| `save_salome_script` | A standalone `result.py` that rebuilds what Claude built |
+| `release_salome` | Hands the agent server back to the chat window |
+| `search_salome_docs`, `read_salome_doc_page` | The documentation index of the RAG modes, searched without an LLM |
+
+1. Start SALOME and open **Tools > Plugins > AI tools > MCP server**. That starts the agent
+   server and an MCP server waiting for clients on `http://127.0.0.1:47801/mcp`, and opens a
+   small window with the command that registers it in each client:
+
+   ```bash
+   claude mcp add --scope user --transport http salome-agent http://127.0.0.1:47801/mcp --header "Authorization: Bearer <token>"
+   gemini mcp add --scope user --transport http --header "Authorization: Bearer <token>" salome-agent http://127.0.0.1:47801/mcp
+   agy mcp add --header "Authorization: Bearer <token>" salome-agent http://127.0.0.1:47801/mcp
+   ```
+
+   Keep the options where they are: `agy` rejects any option after the name and has no
+   `--transport` (it recognises the http URL), and `claude`'s `--header` takes several values,
+   so it comes last.
+
+   Register it once: the port and the token are kept in `~/.local/share/salome-agent/mcp-http.json`
+   (change `port` there if 47801 is taken). Closing the window leaves the server running; it
+   stops with SALOME or with the window's Stop server button, and logs to
+   `~/.local/share/salome-agent/salome-agent-mcp.log`. Keep the chat window out of an Agentic
+   assistant conversation while a client builds: the agent server serves one client at a time.
+   Outside SALOME, `salome-agent-gui.sh --mcp --http [--port N]` runs the same server.
+2. For the documentation tools, build the index once (chat window, Settings > Build index) and
+   download the local models (Settings > Local models).
+3. Claude Desktop starts its own server over stdio instead. Print its entry and merge it into its `claude_desktop_config.json`
+   (Claude Desktop: Settings > Developer > Edit Config):
+
+   ```bash
+   ~/.local/share/salome-agent-gui/bin/salome-agent-mcp --desktop-config
+   ```
+
+   Under WSL the entry starts the server through `wsl.exe`. Quit Claude Desktop completely (tray
+   icon > Quit) before editing the file, since it rewrites the file while it runs, then start it
+   again. The Microsoft Store build of Claude Desktop does not read
+   `%APPDATA%\Claude\claude_desktop_config.json`; it reads
+   `%LOCALAPPDATA%\Claude-Data\claude_<id>\claude_desktop_config.json`. Its logs are in
+   `%LOCALAPPDATA%\Claude\Logs\main.log`; "no stdio servers connected" there means the entry is
+   in a file it does not read.
+4. `salome-agent-mcp --check` prints what Claude will find (agent server, tools, documentation).
+
+Claude Code can also start its own server over stdio, without the menu's:
+`claude mcp add salome-agent -- ~/.local/share/salome-agent-gui/bin/salome-agent-mcp`.
 
 ## Development
 

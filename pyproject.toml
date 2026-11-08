@@ -7,8 +7,9 @@ name = "salome-agent-gui"
 version = "0.1.0"
 requires-python = ">=3.10"
 license = {text = "LGPL-2.1-or-later"}
+# mcp: salome-agent-mcp, SALOME as tools for Claude Desktop / Claude Code
 dependencies = ["salome-agent", "PyQt5", "PyQt5-Qt5==5.15.19", "PyQtWebEngine==5.15.7",
-                "PyQtWebEngine-Qt5==5.15.19"]
+                "PyQtWebEngine-Qt5==5.15.19", "mcp==2.3.0"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt"]
@@ -24,6 +25,7 @@ rag = ["torch", "langchain-core", "langchain-chroma==1.1.0", "langchain-openai==
 [project.scripts]
 salome-agent-gui = "salome_agent_gui.app:main"
 salome-agent-rag-index = "salome_agent_gui.rag_backend:main_index"
+salome-agent-mcp = "salome_agent_gui.mcp_server:main"
 
 [tool.setuptools]
 # raglib is not a package: its sources ship as salome_agent_gui/_raglib/
