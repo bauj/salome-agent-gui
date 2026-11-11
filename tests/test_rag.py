@@ -562,7 +562,13 @@ def test_header_switch_saves_the_mode_and_closes_an_idle_doc_conversation(qtbot,
     b.setMode("rag_agentic")                           # closes it: questions carry no memory
     qtbot.waitUntil(lambda: b.worker is None and not b.busy, timeout=3000)
     assert b.mode() == "rag_agentic" and p.last("setSettings")["active_mode"] == "rag_agentic"
+    assert p.last("setStatus")["label"].startswith("Agentic RAG")
     assert "Agentic RAG" in p.last("addNote")["text"]
+    b.send("second question")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    b.setMode("agent")
+    qtbot.waitUntil(lambda: b.worker is None and not b.busy, timeout=3000)
+    assert b.mode() == "agent" and not p.last("setStatus")["label"].startswith("Agentic RAG")
 
 
 def test_header_switch_waits_for_an_agent_conversation_to_end(bridges, tmp_path):

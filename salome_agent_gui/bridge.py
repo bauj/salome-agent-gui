@@ -304,6 +304,7 @@ class Bridge(QObject):
             return
         if self.worker is not None:            # an idle documentation conversation
             self.busy = True
+            self._worker_mode = None
             self.worker.close()                # _on_worker_finished re-sends the settings
         self._note(f"{rag_backend.MODE_LABEL[mode]}: {rag_backend.MODE_HINT[mode]}")
         self._emit("setSettings", self._settings())
@@ -562,6 +563,8 @@ class Bridge(QObject):
         self.degraded = False
         self._emit("setSettings", self._settings())
         self._sync()
+        if not self.close_pending and not self.server_error:
+            self.probe()
         if self.close_pending and self.indexer is None:
             self.close_ready.emit()
 
