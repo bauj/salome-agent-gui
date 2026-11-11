@@ -26,7 +26,7 @@ def fake_prefix(tmp_path):
     (prefix / "bin").mkdir(parents=True, exist_ok=True)
     (prefix / "bin" / "activate").write_text(
         f'export FAKE_VENV=1\nexport PATH="{prefix}/bin:$PATH"\n')
-    for name in ("salome-agent-gui", "salome-agent-rag-index"):
+    for name in ("salome-agent-gui", "salome-agent-rag-index", "salome-agent-mcp"):
         p = prefix / "bin" / name
         p.write_text(RECORD)
         p.chmod(0o755)
@@ -74,3 +74,13 @@ def test_build_index_runs_the_indexer_with_the_config_made_absolute(tmp_path):
     assert got["args"] == [str(tmp_path / "where-salome-started" / "cfg" / "my.json")]
     assert run(tmp_path, "--build-index", "/abs/c.json")["args"] == ["/abs/c.json"]
     assert run(tmp_path, "--build-index")["args"] == []
+
+
+def test_a_relative_config_is_made_absolute_for_the_mcp_server(tmp_path):
+    start = tmp_path / "where-salome-started"
+    got = run(tmp_path, "--mcp", "--check", "--config", "my.json")
+    assert got["cmd"] == "salome-agent-mcp"
+    assert got["args"] == ["--check", "--config", str(start / "my.json")]
+    got = run(tmp_path, "--mcp", "--desktop-config", "--config=cfg/c.json")
+    assert got["args"] == ["--desktop-config", f"--config={start / 'cfg' / 'c.json'}"]
+    assert run(tmp_path, "--mcp", "--config", "/abs/c.json")["args"] == ["--config", "/abs/c.json"]
