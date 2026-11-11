@@ -624,6 +624,14 @@ class Bridge(QObject):
         ones, into the Hugging Face cache (raglib's download_models.py)."""
         if self.indexer is not None or role not in ("embedding", "reranker", "all"):
             return
+        if self.worker is not None and self._worker_mode in rag_backend.DOC_MODES:
+            self._note("Close the documentation conversation (New conversation) "
+                       "before downloading models.")
+            return
+        if rag_background_busy():
+            self._note("A stopped documentation question is still being answered: "
+                       "download the models once it is done.")
+            return
         try:
             data = json.loads(self.config_path.read_text())
         except (OSError, ValueError) as e:

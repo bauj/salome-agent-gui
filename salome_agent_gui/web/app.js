@@ -765,7 +765,7 @@ function setIndex(p) {
   $("btn-build-index").textContent = p.building && !models ? "Building…" : "Build index";
   for (const role of ["embedding", "reranker"]) {
     const b = $(`btn-dl-${role}`);
-    b.disabled = !!p.building;
+    b.disabled = !!p.building || !!state.locked;
     b.textContent = p.building && models ? "Downloading…" : "Download";
   }
 }
@@ -1110,6 +1110,8 @@ function lockRunOptions(locked) {
   $("set-shared").classList.toggle("disabled", locked);
   $("auto").classList.toggle("disabled", locked);
   $("btn-load-config").disabled = locked;
+  const building = !!(state.settings && state.settings.rag && state.settings.rag.building);
+  for (const role of ["embedding", "reranker"]) $(`btn-dl-${role}`).disabled = locked || building;
   $("run-lock").hidden = !locked;
   $("mode-lock").hidden = !locked;
   $("model-lock").hidden = !locked;

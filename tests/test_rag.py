@@ -750,6 +750,14 @@ def test_download_runs_in_the_background_job_slot_and_refreshes_the_states(qtbot
     assert b.indexer is None and "already installed" in p.last("addNote")["text"]
 
 
+def test_download_models_is_refused_while_a_doc_conversation_is_open(qtbot, bridges, tmp_path):
+    b, p = make(bridges, write_cfg(tmp_path, rag_cfg()), {})
+    b.send("question")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    b.downloadModels("all")
+    assert b.indexer is None and "New conversation" in p.last("addNote")["text"]
+
+
 def test_index_build_fetches_a_missing_embedding_model_first(tmp_path, monkeypatch, hf_cache):
     calls = []
     monkeypatch.setattr(rm, "download", lambda items, on_line, cancel: calls.append(list(items)) or 7)
