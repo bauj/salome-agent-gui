@@ -48,6 +48,12 @@ and then meshing it in SMESH.
 - Groups from the geometry, quality checks and quadratic elements
 - Export to MED, UNV, STL (faces only) or CGNS
 
+**Beyond building**
+- **Ask the documentation:** questions on SALOME answered from its documentation, with links to
+  the pages used (see [Ask the documentation](#ask-the-documentation))
+- **Use your own AI client:** Claude Code, Codex, Gemini CLI, Claude Desktop or another MCP client
+  can build in SALOME with the same tools (see [MCP](#use-it-from-claude-code-gemini-cli-or-claude-desktop-mcp))
+
 ### How a request becomes a model
 
 1. **Describe it in words or pictures.** You can attach drawings, sketches or photos.
@@ -285,11 +291,12 @@ gets the `rag` section from `salome_agent_gui/config.example.json` when the wind
 
 ## Use it from Claude Code, Gemini CLI or Claude Desktop (MCP)
 
-`salome-agent-mcp` gives Claude the SALOME Agent's tools through the
-[Model Context Protocol](https://modelcontextprotocol.io). Claude holds the conversation and
-does the planning under your own Claude plan (Pro included): nothing here calls a model, and
-no API key is needed. It talks to the agent server of the SALOME you have open, like the chat
-window does.
+`salome-agent-mcp` gives an AI client the SALOME Agent's tools through the
+[Model Context Protocol](https://modelcontextprotocol.io). The client's own model holds the
+conversation and does the planning, under the plan you already use it with (a Claude plan for
+Claude Code or Claude Desktop, a ChatGPT plan for Codex, a Google account for Gemini CLI, ...):
+nothing here calls a model, and no API key is needed. It talks to the agent server of the
+SALOME you have open, like the chat window does.
 
 | Tool | What it does |
 |---|---|
@@ -319,6 +326,12 @@ window does.
    stops with SALOME or with the window's Stop server button, and logs to
    `~/.local/share/salome-agent/salome-agent-mcp.log`. Keep the chat window out of an Agentic
    assistant conversation while a client builds: the agent server serves one client at a time.
+   Each MCP client gets its own session, and a second one that asks while the first holds the
+   agent server is told it is busy. A session left 15 minutes without a SALOME call is released,
+   so the chat window can use the server again: the next call says so, and the objects built
+   before stay in the study but can no longer be referred to by name. `save_salome_script`
+   writes to the session's folder, or to a new `.py` file you name; it never overwrites a file
+   it did not write.
    Outside SALOME, `salome-agent-gui.sh --mcp --http [--port N]` runs the same server.
 2. For the documentation tools, build the index once (chat window, Settings > Build index) and
    download the local models (Settings > Local models).

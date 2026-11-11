@@ -84,7 +84,7 @@ cat <<EOF
 
 Done. Start SALOME with:
     $LAUNCHER
-then open Tools > Plugins > SALOME Agent. In the chat window, the gear icon asks
+then open Tools > Plugins > AI tools > SALOME agent. In the chat window, the gear icon asks
 for your LLM endpoint, API key and model, and switches between the SALOME Agent
 and the documentation modes. Build their documentation index there, or with:
     $SALOME_DIR/salome shell -- $PREFIX/bin/salome-agent-gui.sh --build-index
