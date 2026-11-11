@@ -287,6 +287,70 @@ def test_stop_ends_the_turn_without_waiting_for_the_answer(qtbot):
     assert not any(e["kind"] == "rag_answer" for e in events)
 
 
+class CountingSession(FakeSession):
+    """Records how many questions run at once."""
+
+    def __init__(self, rec, release):
+        super().__init__(rec, release=release)
+        self.lock, self.active = threading.Lock(), 0
+
+    def ask(self, question):
+        with self.lock:
+            self.active += 1
+            self.rec["most_at_once"] = max(self.rec.get("most_at_once", 0), self.active)
+        try:
+            return super().ask(question)
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+def test_a_question_after_stop_waits_for_the_stopped_one(qtbot):
+    rec, release = {}, threading.Event()
+    session = CountingSession(rec, release)
+    w = RagWorker({}, agentic=False, open_fn=lambda chatbot, agentic: session)
+    events, done = [], []
+    w.event.connect(events.append)
+    w.turn_done.connect(done.append)
+    w.start()
+    w.submit("first")
+    qtbot.waitUntil(lambda: rec.get("asked") == ["first"], timeout=3000)
+    w.stop()
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    w.submit("second")
+    qtbot.waitUntil(lambda: any(e["data"].get("phase") == "waiting" for e in events), timeout=3000)
+    assert rec["asked"] == ["first"]
+    release.set()
+    qtbot.waitUntil(lambda: len(done) == 2, timeout=3000)
+    stop_worker(w)
+    assert rec["asked"] == ["first", "second"] and rec["most_at_once"] == 1
+    assert done[1]["status"] == "ok"
+
+
+def test_a_load_stopped_halfway_is_kept_for_the_next_question(qtbot):
+    rec, release = {}, threading.Event()
+
+    def open_fn(chatbot, *, agentic):
+        rec["opened"] = rec.get("opened", 0) + 1
+        release.wait(5)
+        return FakeSession(rec)
+
+    w = RagWorker({}, agentic=False, open_fn=open_fn)
+    events, done = [], []
+    w.event.connect(events.append)
+    w.turn_done.connect(done.append)
+    w.start()
+    w.submit("first")
+    qtbot.waitUntil(lambda: rec.get("opened") == 1, timeout=3000)
+    w.stop()
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    w.submit("second")
+    release.set()
+    qtbot.waitUntil(lambda: len(done) == 2, timeout=3000)
+    stop_worker(w)
+    assert rec["opened"] == 1 and rec["asked"] == ["second"] and done[1]["status"] == "ok"
+
+
 def test_undo_is_refused_in_the_documentation_modes(qtbot):
     w = RagWorker({}, agentic=False, open_fn=rag_opener({}))
     _, done = run_worker(qtbot, w, command="undo")
@@ -423,6 +487,28 @@ def test_build_index_is_refused_while_a_doc_conversation_is_open(qtbot, bridges,
     qtbot.waitUntil(lambda: not b.busy, timeout=3000)
     b.buildIndex()
     assert b.indexer is None and "before rebuilding its index" in p.last("addNote")["text"]
+
+
+def test_build_index_waits_for_a_stopped_question_still_running(qtbot, bridges, tmp_path):
+    from salome_agent_gui import rag_worker
+
+    release = threading.Event()
+    rec = {}
+    b, p = make(bridges, write_cfg(tmp_path, rag_cfg()), rec,
+                build_index_fn=lambda path, **kw: 0)
+    b._rag_open_fn = rag_opener(rec, release=release)
+    b.send("slow")
+    qtbot.waitUntil(lambda: rec.get("asked") == ["slow"], timeout=3000)
+    b.stop()
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    b.command("new")
+    qtbot.waitUntil(lambda: b.worker is None, timeout=3000)
+    b.buildIndex()
+    assert b.indexer is None and "still being answered" in p.last("addNote")["text"]
+    release.set()
+    qtbot.waitUntil(lambda: not rag_worker.background_busy(), timeout=3000)
+    b.buildIndex()
+    assert b.indexer is not None
 
 
 def test_doc_questions_wait_for_a_running_index_build_or_download(qtbot, bridges, tmp_path):

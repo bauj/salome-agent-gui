@@ -10,6 +10,7 @@ from salome_agent_gui import config_store, module_icons, rag_backend
 from salome_agent_gui.conversation_worker import ConversationWorker, default_open
 from salome_agent_gui import rag_models
 from salome_agent_gui.rag_worker import IndexWorker, RagWorker
+from salome_agent_gui.rag_worker import background_busy as rag_background_busy
 from salome_agent_gui.timeline import RunView, reasoning_key
 
 IMAGE_ONLY_REQUEST = "Build what the attached image(s) show."
@@ -589,6 +590,10 @@ class Bridge(QObject):
         if self.worker is not None and self._worker_mode in rag_backend.DOC_MODES:
             self._note("Close the documentation conversation (New conversation) "
                        "before rebuilding its index.")
+            return
+        if rag_background_busy():
+            self._note("A stopped documentation question is still being answered: "
+                       "rebuild the index once it is done.")
             return
         self._start_job("index", IndexWorker(self.config_path, build_fn=self._build_index_fn,
                                              parent=self))
