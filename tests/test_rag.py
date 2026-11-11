@@ -425,6 +425,25 @@ def test_build_index_is_refused_while_a_doc_conversation_is_open(qtbot, bridges,
     assert b.indexer is None and "before rebuilding its index" in p.last("addNote")["text"]
 
 
+def test_doc_questions_wait_for_a_running_index_build_or_download(qtbot, bridges, tmp_path):
+    release = threading.Event()
+
+    def build(path, *, on_line, cancel):
+        release.wait(5)
+        return 0
+
+    b, p = make(bridges, write_cfg(tmp_path, rag_cfg()), {}, build_index_fn=build)
+    b.buildIndex()
+    assert p.last("setBusy")["can_send"] is False
+    b.send("q")
+    assert b.worker is None and "index is being built" in p.last("addNote")["text"]
+    release.set()
+    qtbot.waitUntil(lambda: b.indexer is None, timeout=3000)
+    assert p.last("setBusy")["can_send"] is True
+    b.send("q")
+    qtbot.waitUntil(lambda: b.worker is not None and not b.busy, timeout=3000)
+
+
 def test_header_switch_saves_the_mode_and_closes_an_idle_doc_conversation(qtbot, bridges, tmp_path):
     rec = {}
     path = write_cfg(tmp_path, rag_cfg(mode="agent"))

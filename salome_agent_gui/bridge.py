@@ -141,7 +141,17 @@ class Bridge(QObject):
         return {"busy": self.busy, "stopping": self.stopping, "open": self.worker is not None,
                 "degraded": self.degraded, "doc": doc, "mode": self.mode(),
                 "can_switch_mode": self.can_switch_mode(), "modes": list(self.allowed_modes()),
-                "can_send": (self.connected or doc) and not self.busy}
+                "can_send": (self.connected or doc) and not self.busy
+                            and not (doc and self._doc_job_note())}
+
+    def _doc_job_note(self) -> str:
+        """Why a documentation question must wait: raglib would read the index
+        or the models while the background job rewrites them."""
+        if self.indexer is None:
+            return ""
+        if self._job == "models":
+            return "The models are being downloaded: ask once the download is done."
+        return "The documentation index is being built: ask once it is done."
 
     def _icon(self, module: str):
         if module not in self._icons:
@@ -391,6 +401,9 @@ class Bridge(QObject):
         if doc and images:
             self._note(NO_IMAGES)
             return
+        if doc and self._doc_job_note():
+            self._note(self._doc_job_note())
+            return
         if not text and not images:
             return
         if self.worker is None and not self._start_conversation():
@@ -590,6 +603,7 @@ class Bridge(QObject):
         self._set_job_line("starting…")
         worker.start()
         self._emit("setSettings", self._settings())
+        self._sync()
 
     @pyqtSlot(str)
     def downloadModels(self, role: str) -> None:
@@ -647,6 +661,7 @@ class Bridge(QObject):
         self.indexer = None
         self._job = ""
         self._emit("setSettings", self._settings())
+        self._sync()
         if self.close_pending and self.worker is None:
             self.close_ready.emit()
 
