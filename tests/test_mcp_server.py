@@ -289,6 +289,21 @@ def test_no_script_before_anything_is_built_and_paths_must_be_absolute(tmp_path)
     assert "MakeCutList" in target.read_text()
 
 
+def test_the_script_is_a_new_py_file_or_one_this_session_wrote(tmp_path):
+    server, _ = _built(tmp_path)
+    r = call(server, "save_salome_script", {"path": str(tmp_path / "notes.txt")})
+    assert r.is_error and ".py" in text(r)
+    taken = tmp_path / "taken.py"
+    taken.write_text("mine")
+    r = call(server, "save_salome_script", {"path": str(taken)})
+    assert r.is_error and "already exists" in text(r) and taken.read_text() == "mine"
+    target = tmp_path / "part.py"
+    call(server, "save_salome_script", {"path": str(target)})
+    assert not call(server, "save_salome_script", {"path": str(target)}).is_error
+    assert not call(server, "save_salome_script").is_error          # the session folder
+    assert not call(server, "save_salome_script").is_error
+
+
 def test_calc_runs_the_engine_calculator(tmp_path):
     server, _, _ = make(tmp_path)
     assert text(call(server, "calc", {"code": "round(hypot(3, 4), 3)"})).strip().endswith("5.0")
