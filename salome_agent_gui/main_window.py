@@ -32,6 +32,31 @@ def take_request(path: Path) -> str | None:
     return str(data.get("family") or "") if isinstance(data, dict) else None
 
 
+def _pid_stat(pid: int) -> tuple[str, int] | None:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+            return fields[0], int(fields[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _parent_alive(pid: int, start: int | None) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = _pid_stat(pid)
+    if stat is None:
+        return True
+    state, live_start = stat
+    if state == "Z":
+        return False
+    return start is None or start == live_start
+
+
 def _open_file(path: str) -> None:
     QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
@@ -80,6 +105,8 @@ class MainWindow(QMainWindow):
             except (KeyError, ValueError):
                 parent_pid = None
         self._parent_pid = parent_pid
+        self._parent_start = _pid_stat(parent_pid)[1] if (
+            parent_pid is not None and _pid_stat(parent_pid)) else None
         self._parent_watch = None
         if self._parent_pid is not None:
             self._parent_watch = QTimer(self)
@@ -101,13 +128,7 @@ class MainWindow(QMainWindow):
         return self.palette().color(QPalette.Window).lightness() < 128
 
     def _check_parent(self):
-        try:
-            os.kill(self._parent_pid, 0)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            return
-        else:
+        if _parent_alive(self._parent_pid, self._parent_start):
             return
         self._parent_watch.stop()
         self.close()

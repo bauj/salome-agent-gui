@@ -79,6 +79,12 @@ def test_check_parent_closes_when_parent_is_gone(qtbot, cfg_path):
     w.show()
     w._check_parent()
     assert not w.isVisible()
+    # A zombie or reused PID also closes the window
+    w2, _ = make(qtbot, cfg_path, {}, parent_pid=os.getpid())
+    w2.show()
+    w2._parent_start = -1
+    w2._check_parent()
+    assert not w2.isVisible()
 
 
 def test_check_parent_leaves_window_open_when_parent_is_alive(qtbot, cfg_path):

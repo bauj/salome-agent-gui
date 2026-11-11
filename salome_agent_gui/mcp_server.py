@@ -804,8 +804,20 @@ def require_token(app, token: str):
     return guarded
 
 
+def _pid_stat(pid: int) -> tuple[str, int] | None:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+            return fields[0], int(fields[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
 def watch_parent(pid: int, interval: float = 2.0, exit_fn=os._exit) -> threading.Thread:
     """Stop the process when SALOME (the process that started it) is gone."""
+    init = _pid_stat(pid)
+    start = init[1] if init else None
+
     def run():
         while True:
             time.sleep(interval)
@@ -815,7 +827,11 @@ def watch_parent(pid: int, interval: float = 2.0, exit_fn=os._exit) -> threading
                 exit_fn(0)
                 return
             except PermissionError:
-                pass
+                continue
+            stat = _pid_stat(pid)
+            if stat is not None and (stat[0] == "Z" or (start is not None and stat[1] != start)):
+                exit_fn(0)
+                return
     t = threading.Thread(target=run, name="parent-watch", daemon=True)
     t.start()
     return t

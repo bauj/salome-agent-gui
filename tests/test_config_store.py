@@ -123,10 +123,15 @@ def test_save_settings_ignores_bad_values(tmp_path):
         ("system", "abort", "hints", 2)
 
 
-def test_gui_section_is_accepted_by_the_agent_config_loader(tmp_path):
+def test_gui_section_is_accepted_by_the_agent_config_loader(tmp_path, monkeypatch):
     user = cs.ensure_user_config(tmp_path / "u.json", [_seed(tmp_path)])
     cs.save_settings(user, {"base_url": "http://h", "model": "m", "theme": "dark"})
     assert cs.load(user)["llm"]["model"] == "m"
+    seen = []
+    real_load = cs.load
+    monkeypatch.setattr(cs, "load", lambda p, **kw: seen.append(p.parent) or real_load(p, **kw))
+    cs.save_raw(user, user.read_text())
+    assert seen == [tmp_path]
 
 
 @pytest.mark.parametrize("text", ["{not json", "[1, 2]", '{"llm": null, "gui": 3}',

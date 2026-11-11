@@ -122,12 +122,18 @@ def load(path: Path, *, check_rag: bool | None = None) -> dict:
 
 
 def save_raw(path: Path, text: str) -> None:
+    path = Path(path)
     data = json.loads(text)
-    with tempfile.TemporaryDirectory() as d:
-        probe = Path(d) / "probe.json"
-        probe.write_text(json.dumps(data))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".probe-", suffix=".json")
+    probe = Path(tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
         load(probe)
-    _write(Path(path), data)
+    finally:
+        probe.unlink(missing_ok=True)
+    _write(path, data)
 
 
 THEMES = ("system", "light", "dark")
