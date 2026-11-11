@@ -622,6 +622,11 @@ def test_doc_sources_save_in_order_keeping_unshown_keys_across_a_rename(tmp_path
     assert modules["GEOMETRY"] == {"description": "geometry", "user_path": "/g2", "methodology_path": "/m",
                                    "_note": "x", "url_for_sources_citation": "https://d/GEOM"}
     assert cs.read_settings(path)["doc_sources"][1]["json_only"] == ["methodology_path"]
+    # A freshly added row (orig="") reusing an old/deleted name does not inherit its hidden keys
+    cs.save_settings(path, {"doc_sources": [
+        {"orig": "", "name": "GEOMETRY", "user_path": "/fresh"}]})
+    assert json.loads(path.read_text())["rag"]["extraction"]["modules"]["GEOMETRY"] == {
+        "user_path": "/fresh"}
 
 
 @pytest.mark.parametrize("rows, match", [

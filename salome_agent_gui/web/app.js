@@ -1037,7 +1037,11 @@ function sourcesError(rows) {
     }
     if (seen.has(row.name)) return `Documentation source "${row.name}" is listed twice.`;
     seen.add(row.name);
-    if (!row.dev_path && !row.user_path) return `Source "${row.name}": give at least one folder.`;
+    const orig = row.orig && ((state.settings || {}).doc_sources || []).find((s) => s.name === row.orig);
+    const hasMethodology = orig && (orig.json_only || []).includes("methodology_path");
+    if (!row.dev_path && !row.user_path && !hasMethodology) {
+      return `Source "${row.name}": give at least one folder.`;
+    }
   }
   return "";
 }

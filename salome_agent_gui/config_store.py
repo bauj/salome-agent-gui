@@ -392,7 +392,8 @@ def _save_doc_sources(data: dict, rows) -> None:
             raise ValueError(f"documentation source name {name!r}: use letters, digits, _ . + -")
         if name in modules:
             raise ValueError(f"documentation source {name!r} is listed twice")
-        kept = old.get(text["orig"] or name)
+        orig_name = text["orig"] if "orig" in row else name
+        kept = old.get(orig_name) if orig_name else None
         module = {k: v for k, v in kept.items() if k not in SOURCE_KEYS} if isinstance(kept, dict) else {}
         if text["description"]:
             module["description"] = text["description"]
