@@ -27,6 +27,22 @@ export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 # raglib writes relative to the working directory (the agentic mode creates
 # debug_traces/ there): keep that out of wherever SALOME was started.
 START_DIR=$PWD
+# a relative --config is relative to where the command was typed
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --config)
+            args+=("$1"); shift
+            if [ $# -gt 0 ]; then
+                case "$1" in /*) args+=("$1") ;; *) args+=("$START_DIR/$1") ;; esac
+                shift
+            fi ;;
+        --config=/*) args+=("$1"); shift ;;
+        --config=*) args+=("--config=$START_DIR/${1#--config=}"); shift ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+set -- "${args[@]}"
 DATA_DIR=${SALOME_AGENT_GUI_DATA_DIR:-$HOME/.local/share/salome-agent/rag}
 mkdir -p "$DATA_DIR" && cd "$DATA_DIR" || exit 1
 
