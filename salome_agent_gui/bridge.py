@@ -204,9 +204,9 @@ class Bridge(QObject):
 
     def _enter_family(self) -> None:
         """Opened from a menu entry whose family does not hold the saved mode:
-        save the family's first mode (no conversation is open yet)."""
+        save the family's first mode."""
         allowed = self.allowed_modes()
-        if self.worker is None and self.mode() not in allowed:
+        if config_store.read_settings(self.config_path)["mode"] not in allowed:
             try:
                 config_store.save_settings(self.config_path, {"mode": allowed[0]})
             except (OSError, ValueError) as e:
@@ -315,8 +315,12 @@ class Bridge(QObject):
     @pyqtSlot()
     def editConfigJson(self) -> None:
         if self._edit_config(self._dialog_parent, self.config_path):
+            self._enter_family()
             self._emit("setSettings", self._settings())
             self._emit("setTheme", self._theme())
+            self._sync()
+            if not self.server_error:
+                self.probe()
 
     @pyqtSlot()
     def loadConfig(self) -> None:
@@ -336,6 +340,7 @@ class Bridge(QObject):
             self._emit("setStatus", self._status)
             return
         self.config_path = path
+        self._enter_family()
         try:
             config_store.remember_config(path)
         except OSError as e:

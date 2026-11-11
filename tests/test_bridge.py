@@ -701,6 +701,30 @@ def test_a_family_limits_the_modes_and_enters_its_own(qtbot, bridges, cfg_path):
     assert _saved_mode(cfg_path) == "rag_agentic"
 
 
+def test_load_and_edit_json_config_keep_the_window_within_its_family_and_refresh_status(
+    bridges, cfg_path, tmp_path, gui_state
+):
+    from salome_agent_gui import config_store
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({**CFG, "gui": {"mode": "agent"},
+                                 "llm": {**CFG["llm"], "model": "gemma"}}))
+
+    def edit_to_agent(_parent, path):
+        config_store.save_settings(path, {"mode": "agent", "model": "mistral"})
+        return True
+
+    b, p = make(bridges, cfg_path, {}, family="rag",
+                pick_config=lambda parent, current: other,
+                edit_config=edit_to_agent)
+    b.start()
+    b.loadConfig()
+    assert b.config_path == other and _saved_mode(other) == "rag"
+    assert b.mode() == "rag" and "gemma" in p.last("setStatus")["label"]
+    b.editConfigJson()
+    assert _saved_mode(other) == "rag" and b.mode() == "rag"
+    assert "mistral" in p.last("setStatus")["label"]
+
+
 def test_an_agent_window_keeps_a_doc_mode_out(qtbot, bridges, cfg_path):
     from salome_agent_gui import config_store
     config_store.save_settings(cfg_path, {"mode": "rag_agentic"})
