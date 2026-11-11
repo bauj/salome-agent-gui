@@ -34,10 +34,15 @@ while [ $# -gt 0 ]; do
         --config)
             args+=("$1"); shift
             if [ $# -gt 0 ]; then
-                case "$1" in /*) args+=("$1") ;; *) args+=("$START_DIR/$1") ;; esac
+                case "$1" in
+                    /*) args+=("$1") ;;
+                    "~"/*) args+=("$HOME/${1#\~/}") ;;
+                    *) args+=("$START_DIR/$1") ;;
+                esac
                 shift
             fi ;;
         --config=/*) args+=("$1"); shift ;;
+        --config="~"/*) args+=("--config=$HOME/${1#--config=\~/}"); shift ;;
         --config=*) args+=("--config=$START_DIR/${1#--config=}"); shift ;;
         *) args+=("$1"); shift ;;
     esac
@@ -54,9 +59,11 @@ fi
 if [ "$1" = "--build-index" ]; then
     shift
     # a relative CONFIG is relative to where the command was typed
-    if [ -n "$1" ] && [ "${1#/}" = "$1" ]; then
-        set -- "$START_DIR/$1" "${@:2}"
-    fi
+    case "$1" in
+        "" | -* | /*) ;;
+        "~"/*) set -- "$HOME/${1#\~/}" "${@:2}" ;;
+        *) set -- "$START_DIR/$1" "${@:2}" ;;
+    esac
     exec salome-agent-rag-index "$@"
 fi
 exec salome-agent-gui "$@"

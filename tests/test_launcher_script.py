@@ -73,6 +73,8 @@ def test_build_index_runs_the_indexer_with_the_config_made_absolute(tmp_path):
     assert got["cmd"] == "salome-agent-rag-index"
     assert got["args"] == [str(tmp_path / "where-salome-started" / "cfg" / "my.json")]
     assert run(tmp_path, "--build-index", "/abs/c.json")["args"] == ["/abs/c.json"]
+    assert run(tmp_path, "--build-index", "~/c.json")["args"] == [str(tmp_path / "home" / "c.json")]
+    assert run(tmp_path, "--build-index", "--help")["args"] == ["--help"]
     assert run(tmp_path, "--build-index")["args"] == []
 
 
@@ -84,3 +86,5 @@ def test_a_relative_config_is_made_absolute_for_the_mcp_server(tmp_path):
     got = run(tmp_path, "--mcp", "--desktop-config", "--config=cfg/c.json")
     assert got["args"] == ["--desktop-config", f"--config={start / 'cfg' / 'c.json'}"]
     assert run(tmp_path, "--mcp", "--config", "/abs/c.json")["args"] == ["--config", "/abs/c.json"]
+    assert run(tmp_path, "--mcp", "--config=~/c.json")["args"] == [
+        f"--config={tmp_path / 'home' / 'c.json'}"]
