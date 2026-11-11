@@ -595,6 +595,7 @@ function answerCard(vm) {
   let title = ANSWER_TITLE[r.status] || "Answer";
   if (r.status === "running") {
     title = r.phase === "loading" ? "Loading the documentation index…"
+      : r.phase === "waiting" ? "Waiting for the stopped question to finish…"
       : (r.agentic ? "Searching and reading the documentation…" : "Searching the documentation…");
   }
   head.appendChild(el("span", null, title));
