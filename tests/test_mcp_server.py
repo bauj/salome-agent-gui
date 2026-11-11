@@ -277,6 +277,10 @@ def test_deleted_objects_leave_the_script_unless_a_kept_one_needs_them(tmp_path)
     server, session = _built(tmp_path)
     call(server, "delete_objects", {"names": ["box_1"]})
     assert "MakeBoxDXDYDZ" in session.script()             # cut_1 is built from it
+    call(server, "delete_objects", {"names": ["cut_1"]})
+    assert "MakeCutList" not in session.script()
+    call(server, "call_cad_tool", {"module": "geom", "name": "cut", "arguments": {}})
+    assert "MakeCutList" in session.script()               # recreated with the same name
 
 
 def test_no_script_before_anything_is_built_and_paths_must_be_absolute(tmp_path):
