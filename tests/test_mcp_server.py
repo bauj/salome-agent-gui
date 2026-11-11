@@ -600,3 +600,15 @@ def test_the_token_file_is_made_private_even_if_it_was_not(tmp_path):
     p.chmod(0o644)
     ms.http_settings(p)                                  # rewritten
     assert p.stat().st_mode & 0o777 == 0o600
+
+
+def test_check_reports_a_broken_catalogue_and_still_shows_the_docs(tmp_path, monkeypatch, capsys):
+    def broken(module):
+        raise ImportError(f"no executor.{module}")
+
+    monkeypatch.setattr(ms, "_catalogue", broken)
+    monkeypatch.setattr(ms.DocSearch, "_get", lambda self: FAKE_DOCS)
+    assert ms.check(str(tmp_path / "c.json")) == 0
+    err = capsys.readouterr().err
+    assert "geom: tools not available (ImportError: no executor.geom)" in err
+    assert "documentation search: ready" in err
