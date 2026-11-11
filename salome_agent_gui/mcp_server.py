@@ -685,7 +685,10 @@ def check(config=None) -> int:
         print(f"agent server: {e}", file=sys.stderr)
     print(f"config: {docs.status()}", file=sys.stderr)
     for module in MODULES:
-        print(f"{module}: {len(_catalogue(module))} tools", file=sys.stderr)
+        try:
+            print(f"{module}: {len(_catalogue(module))} tools", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"{module}: tools not available ({type(e).__name__}: {e})", file=sys.stderr)
     try:
         docs._get()
         print("documentation search: ready", file=sys.stderr)
