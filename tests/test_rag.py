@@ -126,6 +126,21 @@ def test_config_store_load_and_save_raw_check_the_rag_section(tmp_path):
     assert path.read_text() == before
 
 
+def test_a_bad_rag_section_or_a_broken_raglib_never_stops_the_agent_mode(tmp_path, monkeypatch):
+    path = write_cfg(tmp_path, rag_cfg(mode="agent", bogus=1))
+    assert cs.load(path)["gui"]["mode"] == "agent"
+    with pytest.raises(rb.RagError):
+        cs.load(path, check_rag=True)
+
+    def broken():
+        raise ImportError("no module named pydantic")
+
+    monkeypatch.setattr(rb, "_config_cls", broken)
+    with pytest.raises(rb.RagError, match="could not be loaded"):
+        rb.check(rag_cfg(), path)
+    cs.load(write_cfg(tmp_path, rag_cfg(mode="agent")))
+
+
 def test_gui_example_keeps_the_engine_example_and_adds_mode_and_rag():
     gui, engine = json.loads(EXAMPLE.read_text()), json.loads(ENGINE_EXAMPLE.read_text())
     for key, value in engine.items():

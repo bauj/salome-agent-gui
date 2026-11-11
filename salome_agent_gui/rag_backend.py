@@ -245,7 +245,11 @@ def check(data: dict, config_path) -> None:
         raise RagError('"rag.chatbot.llm" must be an object')
     chatbot = {k: v for k, v in chatbot.items() if not (k == "llm" and v is None)}
     try:
-        _load_config(_config_cls(), chatbot)
+        cls = _config_cls()
+    except (ImportError, OSError, SyntaxError) as e:
+        raise RagError(f"raglib's config checks could not be loaded: {e}") from e
+    try:
+        _load_config(cls, chatbot)
     except (ValueError, TypeError, AttributeError) as e:
         raise RagError(f"rag.chatbot: {e}") from e
 
