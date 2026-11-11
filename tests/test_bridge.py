@@ -237,6 +237,11 @@ def test_failed_undo_note_says_it_failed(qtbot, bridges, cfg_path):
     b.command("undo")
     qtbot.waitUntil(lambda: not b.busy, timeout=3000)
     assert p.last("addNote") == {"text": "undo failed: nothing to undo"}
+    rec["conv"].undo = lambda: (_ for _ in ()).throw(RuntimeError("study vanished"))
+    b.command("undo")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    assert p.last("addNote") == {"text": "undo failed: RuntimeError: study vanished"}
+    assert vm(p)["status"] == "ok" and b._turns[0].fatal is None
 
 
 def test_rebuild_only_runs_when_degraded(qtbot, bridges, cfg_path):

@@ -431,6 +431,14 @@ class Bridge(QObject):
         self._sync()
 
     def _on_event(self, ev: dict) -> None:
+        if ev.get("kind") == "fatal":
+            message = (ev.get("data") or {}).get("message", "")
+            if message.startswith("ServerUnavailable"):
+                self.connected = False
+                self.server_error = True
+                self._status = {"state": "error", "label": "Server error", "detail": message}
+                self._emit("setStatus", self._status)
+                self._sync()
         view = self._turns.get(self._current)
         if view is None:
             return
@@ -449,14 +457,6 @@ class Bridge(QObject):
             for src in (ev.get("data") or {}).get("sources") or []:
                 self._links.update(x for x in (src.get("url"), src.get("path")) if x)
         self._render()
-        if ev.get("kind") == "fatal":
-            message = (ev.get("data") or {}).get("message", "")
-            if message.startswith("ServerUnavailable"):
-                self.connected = False
-                self.server_error = True
-                self._status = {"state": "error", "label": "Server error", "detail": message}
-                self._emit("setStatus", self._status)
-                self._sync()
 
     def _on_gate(self, payload: dict) -> None:
         view = self._turns.get(self._current)
@@ -512,6 +512,7 @@ class Bridge(QObject):
             return
         if name == "rebuild" and not self.degraded:
             return
+        self._current = None
         self.busy = True
         getattr(self.worker, name)()
         self._sync()
