@@ -395,6 +395,27 @@ def test_desktop_config_prints_a_mergeable_json(capsys):
     assert list(printed["mcpServers"]) == ["salome-agent"]
 
 
+def test_doc_search_loads_the_index_again_once_it_is_rebuilt(tmp_path):
+    import os
+
+    index = tmp_path / "page_index.json"
+    index.write_text("[]")
+    loads = []
+
+    def loader(path):
+        loads.append(path)
+        return dict(FAKE_DOCS, watch=[str(index)])
+
+    docs = ms.DocSearch(tmp_path / "c.json", loader=loader)
+    docs.search("mesh")
+    docs.search("mesh")
+    assert len(loads) == 1
+    st = index.stat()
+    os.utime(index, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    docs.search("mesh")
+    assert len(loads) == 2
+
+
 def test_online_links_come_from_the_module_citation_and_the_page_path(tmp_path):
     roots = ms.online_roots({"modules": {
         "GEOM": {"user_path": str(tmp_path / "gui/GEOM"), "dev_path": str(tmp_path / "tui/GEOM"),
