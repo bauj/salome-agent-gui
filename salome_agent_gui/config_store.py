@@ -106,12 +106,18 @@ def save_key_fields(path: Path, fields: dict) -> None:
     _write(Path(path), data)
 
 
-def load(path: Path) -> dict:
-    """The engine's checks, then raglib's on the `rag` section if there is one."""
+def load(path: Path, *, check_rag: bool | None = None) -> dict:
+    """The engine's checks, then raglib's on the `rag` section when a
+    documentation mode will read it (by default: when gui.mode is one), so a
+    bad rag section or a broken raglib never stops the agent mode."""
     from salome_agent.config import load_config
 
     config = load_config(str(path))
-    rag_backend.check(config, path)
+    if check_rag is None:
+        gui = config.get("gui") if isinstance(config.get("gui"), dict) else {}
+        check_rag = gui.get("mode") in rag_backend.DOC_MODES
+    if check_rag:
+        rag_backend.check(config, path)
     return config
 
 

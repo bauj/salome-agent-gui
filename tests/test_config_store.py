@@ -413,7 +413,7 @@ def test_rag_options_save_into_rag_chatbot_and_keep_other_keys(tmp_path):
     assert chatbot["agentic"]["max_steps"] == 12 and chatbot["agentic"]["section_top_n"] == 5
     assert chatbot["project_name"] == "salome" and data["rag"]["extraction"]
     assert data["salome"] == SEED["salome"]
-    cs.load(user)                                  # raglib still accepts it
+    cs.load(user, check_rag=True)                  # raglib still accepts it
 
 
 def test_rag_options_are_locked_with_the_run_options(tmp_path):
@@ -430,7 +430,7 @@ def test_reranker_off_parks_the_block_and_on_brings_it_back(tmp_path):
     user.write_text(json.dumps(data))
     cs.save_settings(user, {"rag_options": {"reranker": False}})
     assert cs.read_settings(user)["rag_options"]["reranker"] is False
-    cs.load(user)                                  # the parked block is a comment to raglib
+    cs.load(user, check_rag=True)                  # the parked block is a comment to raglib
     cs.save_settings(user, {"rag_options": {"reranker": True}})
     chatbot = json.loads(user.read_text())["rag"]["chatbot"]
     assert chatbot["reranker"]["type"] == "cross_encoder" and cs.RERANKER_PARKED not in chatbot
