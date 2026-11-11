@@ -205,6 +205,38 @@ def test_release_hands_the_server_back(tmp_path):
     assert len(opened) == 2 and opened[0][0] != opened[1][0]   # a new session, a new run id
 
 
+def test_a_session_left_idle_is_released_and_the_next_call_says_so(tmp_path):
+    now, opened, client = [0.0], [], FakeClient()
+
+    def connect(run_id, run_dir):
+        opened.append(run_id)
+        return client
+
+    session = ms.SalomeSession(connect=connect, runs_dir=tmp_path, idle_release_s=600,
+                               clock=lambda: now[0])
+    pool = ms.SessionPool(single=session, reap_every=0)
+    server = ms.build_server(pool, ms.DocSearch(loader=lambda p: FAKE_DOCS))
+    call(server, "list_study")
+    now[0] = 599
+    pool.reap()
+    assert not client.closed
+    call(server, "list_study")                       # a call restarts the idle clock
+    now[0] = 599 + 601
+    pool.reap()
+    assert client.closed and session.client is None
+    r = call(server, "list_study")
+    assert r.is_error and "released after 10 minutes" in text(r)
+    assert not call(server, "list_study").is_error and len(opened) == 2
+
+
+def test_each_client_gets_its_own_session(tmp_path):
+    pool = ms.SessionPool(factory=lambda: ms.SalomeSession(runs_dir=tmp_path), reap_every=0)
+    assert pool.get("a") is pool.get("a")
+    assert pool.get("a") is not pool.get("b") and pool.get(None) is not pool.get("a")
+    single = ms.SalomeSession(runs_dir=tmp_path)
+    assert ms.SessionPool(single=single, reap_every=0).get("x") is single
+
+
 def test_the_view_comes_back_as_an_image(tmp_path):
     server, _, _ = make(tmp_path, FakeClient())
     r = call(server, "view_salome")
@@ -427,6 +459,76 @@ def test_over_http_the_server_waits_for_clients_with_the_token(tmp_path):
     err = (tmp_path / "stderr.txt").read_text()
     assert f"claude mcp add --scope user --transport http salome-agent {url}" in err
     assert f"salome-agent {url}" in err.split("agy mcp add", 1)[1]
+
+
+HTTP_SESSIONS_SCRIPT = textwrap.dedent("""
+    import sys
+    from salome_agent_gui import mcp_server as ms
+
+    class Client:
+        mode, name_prefix = "gui", ""
+
+        def __init__(self, run_id):
+            self.run_id = run_id
+
+        def list_study(self):
+            return {"objects": [{"name": self.run_id}]}
+
+        def close(self):
+            pass
+
+    def factory():
+        return ms.SalomeSession(connect=lambda run_id, run_dir: Client(run_id),
+                                runs_dir=sys.argv[3])
+
+    ms.serve_http(ms.build_server(ms.SessionPool(factory=factory),
+                                  ms.DocSearch(loader=lambda p: None)),
+                  int(sys.argv[1]), sys.argv[2])
+""")
+
+
+def test_over_http_each_client_has_its_own_salome_session(tmp_path):
+    import subprocess
+    import time
+
+    import httpx2
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    script = tmp_path / "serve_http.py"
+    script.write_text(HTTP_SESSIONS_SCRIPT)
+    port, token = _free_port(), "s3cret-token-0123456789"
+    url = ms.http_url(port)
+    proc = subprocess.Popen([sys.executable, str(script), str(port), token, str(tmp_path / "runs")],
+                            stderr=subprocess.DEVNULL)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def client_runs():
+        async with httpx2.AsyncClient(headers=headers) as http:
+            async with streamable_http_client(url, http_client=http) as streams:
+                async with ClientSession(*streams[:2]) as client:
+                    await client.initialize()
+                    runs = []
+                    for _ in range(2):
+                        r = await client.call_tool("list_study", {})
+                        runs.append(json.loads(r.content[0].text)["objects"][0]["name"])
+                    return runs
+
+    try:
+        deadline = time.time() + 30
+        while True:
+            try:
+                httpx2.post(url, json={})
+                break
+            except httpx2.ConnectError:
+                assert proc.poll() is None and time.time() < deadline
+                time.sleep(0.2)
+        first, second = asyncio.run(client_runs()), asyncio.run(client_runs())
+    finally:
+        proc.terminate()
+        proc.wait(10)
+    assert first[0] == first[1] and second[0] == second[1]      # one session per client
+    assert first[0] != second[0]
 
 
 def test_http_settings_keep_the_token_and_take_a_new_port(tmp_path):

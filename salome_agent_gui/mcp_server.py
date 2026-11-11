@@ -44,6 +44,9 @@ RUNS_DIR = Path.home() / ".local" / "share" / "salome-agent" / "mcp"
 # --http: port and token, shared with the SALOME menu's dialog (sagui_launcher)
 HTTP_FILE = Path.home() / ".local" / "share" / "salome-agent" / "mcp-http.json"
 DEFAULT_PORT = 47801
+# a held session nobody calls for this long is released, so the chat window
+# is not locked out by a client that went away or forgot release_salome
+IDLE_RELEASE_S = 15 * 60
 SERVER_NAME = "salome-agent"
 
 INSTRUCTIONS = """\
@@ -62,7 +65,8 @@ Building:
 6. save_salome_script writes a standalone Python script that rebuilds what was
    built; offer it at the end.
 7. When done building, call release_salome so the SALOME chat window can use
-   the agent server again.
+   the agent server again. After 15 minutes without a SALOME call the session is
+   released anyway, and the names built before can no longer be used.
 
 Documentation: search_salome_docs, then read_salome_doc_page for a page worth
 reading in full. Answer from what they return and cite the pages."""
@@ -110,10 +114,15 @@ class SalomeSession:
     session resets the server's name bindings, so it is kept for as long as
     Claude builds; release() ends it."""
 
-    def __init__(self, connect=None, runs_dir: Path = RUNS_DIR):
+    def __init__(self, connect=None, runs_dir: Path = RUNS_DIR,
+                 idle_release_s: float = IDLE_RELEASE_S, clock=time.monotonic):
         self._connect = connect
         self._runs_dir = Path(runs_dir)
         self._lock = threading.RLock()
+        self._idle_s = idle_release_s
+        self._clock = clock
+        self._last_used = clock()
+        self._idle_released = False
         self.client = None
         self.run_id = None
         self.calls: list[dict] = []          # {module, tool, args, records}
@@ -143,6 +152,14 @@ class SalomeSession:
         from salome_agent.executor_client import SessionDied, SessionPoisoned
 
         with self._lock:
+            if self._idle_released:
+                self._idle_released = False
+                raise SalomeError(
+                    f"this session was released after {self._idle_s / 60:g} minutes without a "
+                    "SALOME call, so the SALOME chat window could use the agent server. The "
+                    "objects built so far stay in the study, but can no longer be referred to "
+                    "by name; save_salome_script still writes what was built. Call again to "
+                    "open a new session.")
             if self.client is None:
                 self._open()
             try:
@@ -154,6 +171,18 @@ class SalomeSession:
                     "the study, but this session can no longer refer to them by name; the "
                     "next call opens a new session. If SALOME restarted, start the server "
                     "again from Tools > Plugins > AI tools > MCP server.") from e
+            finally:
+                self._last_used = self._clock()
+
+    def release_if_idle(self) -> bool:
+        """Release the agent server if no call came for idle_release_s; the next
+        call says so instead of quietly opening a session that knows no names."""
+        with self._lock:
+            if self.client is None or self._clock() - self._last_used < self._idle_s:
+                return False
+            self._drop()
+            self._idle_released = True
+            return True
 
     def _drop(self):
         if self.client is not None:
@@ -165,6 +194,7 @@ class SalomeSession:
 
     def release(self) -> str:
         with self._lock:
+            self._idle_released = False
             if self.client is None:
                 return "No SALOME session was open."
             run_id = self.run_id
@@ -237,6 +267,57 @@ class SalomeSession:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
         return target
+
+
+class SessionPool:
+    """A SalomeSession per MCP client: each --http client (MCP session id) gets
+    its own names, recorded calls and script, and a second client asking while
+    the first holds the agent server is told it is busy. Stdio has one client.
+    Also releases sessions left idle."""
+
+    def __init__(self, factory=SalomeSession, single: SalomeSession | None = None,
+                 reap_every: float = 30.0):
+        self._factory = factory
+        self._single = single
+        self._sessions: dict = {}
+        self._lock = threading.Lock()
+        self._reap_every = reap_every
+        self._reaper = None
+
+    def get(self, key=None) -> SalomeSession:
+        with self._lock:
+            if self._single is not None:
+                session = self._single
+            else:
+                session = self._sessions.get(key)
+                if session is None:
+                    session = self._sessions[key] = self._factory()
+            if self._reaper is None and self._reap_every:
+                self._reaper = threading.Thread(target=self._reap_loop, daemon=True,
+                                                name="mcp-idle-release")
+                self._reaper.start()
+        return session
+
+    def reap(self) -> None:
+        with self._lock:
+            sessions = [self._single] if self._single is not None else list(self._sessions.values())
+        for session in sessions:
+            session.release_if_idle()
+
+    def _reap_loop(self) -> None:
+        while True:
+            time.sleep(self._reap_every)
+            self.reap()
+
+
+def client_key(ctx) -> str | None:
+    """The MCP session id of the client making this request (--http), None on stdio."""
+    try:
+        request = ctx.request_context.request
+    except (AttributeError, ValueError):
+        return None
+    headers = getattr(request, "headers", None)
+    return headers.get("mcp-session-id") if headers is not None else None
 
 
 # ---- the documentation side -----------------------------------------------
@@ -410,12 +491,18 @@ def guide(module: str) -> str:
             + f"\n\n# All {module} tools\n" + catalogue)
 
 
-def build_server(session: SalomeSession | None = None, docs: DocSearch | None = None):
-    from mcp.server.mcpserver import Image, MCPServer
+def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSearch | None = None):
+    from mcp.server.mcpserver import Context, Image, MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
     from mcp_types import ToolAnnotations
 
-    session = session or SalomeSession()
+    if isinstance(session, SessionPool):
+        pool = session
+    else:
+        pool = SessionPool(single=session) if session is not None else SessionPool()
+
+    def mine(ctx) -> SalomeSession:
+        return pool.get(client_key(ctx))
     docs = docs or DocSearch()
     server = MCPServer("salome-agent", instructions=INSTRUCTIONS)
     read_only = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -430,7 +517,7 @@ def build_server(session: SalomeSession | None = None, docs: DocSearch | None = 
         return run
 
     @server.tool(annotations=read_only, structured_output=False)
-    def salome_status() -> str:
+    def salome_status(ctx: Context) -> str:
         """Whether the SALOME session and the documentation search are available."""
         try:
             from salome_agent import server_conn
@@ -439,7 +526,7 @@ def build_server(session: SalomeSession | None = None, docs: DocSearch | None = 
             hs = None
         out = {"agent_server": ("running" if hs else "not found: in SALOME, open Tools > Plugins "
                                 "> AI tools > MCP server"),
-               "salome": session.status(), "docs": docs.status()}
+               "salome": mine(ctx).status(), "docs": docs.status()}
         return json.dumps(out, indent=1)
 
     @server.tool(annotations=read_only, structured_output=False)
@@ -461,14 +548,14 @@ def build_server(session: SalomeSession | None = None, docs: DocSearch | None = 
         return guarded(run)()
 
     @server.tool(annotations=builds, structured_output=False)
-    def call_cad_tool(module: str, name: str, arguments: dict) -> str:
+    def call_cad_tool(module: str, name: str, arguments: dict, ctx: Context) -> str:
         """Run a SALOME tool in the user's study: module "shaper", "geom" or "smesh",
         the tool name, and its arguments as described by describe_cad_tool."""
         from salome_agent.modules import spec_for
 
         def run():
             _catalogue(module)                         # a clear error for a bad module
-            result = session.call_tool(module, name, arguments or {})
+            result = mine(ctx).call_tool(module, name, arguments or {})
             if not result.get("ok"):
                 raise SalomeError(f"{name} failed: {result.get('error') or result}")
             try:
@@ -487,12 +574,12 @@ def build_server(session: SalomeSession | None = None, docs: DocSearch | None = 
         return run_calc(code)
 
     @server.tool(annotations=read_only, structured_output=False)
-    def view_salome():
+    def view_salome(ctx: Context):
         """A picture of SALOME's 3D view as it is now."""
         import base64
 
         def run():
-            r = session.view_image()
+            r = mine(ctx).view_image()
             uri = r.get("image") or ""
             if not r.get("ok", True) or not uri.startswith("data:image/"):
                 raise SalomeError(r.get("error") or "SALOME returned no image")
@@ -502,43 +589,43 @@ def build_server(session: SalomeSession | None = None, docs: DocSearch | None = 
         return guarded(run)()
 
     @server.tool(annotations=read_only, structured_output=False)
-    def list_study() -> str:
+    def list_study(ctx: Context) -> str:
         """The top-level objects of the SALOME study."""
-        return json.dumps(guarded(session.list_study)(), default=str, indent=1)
+        return json.dumps(guarded(mine(ctx).list_study)(), default=str, indent=1)
 
     @server.tool(annotations=builds, structured_output=False)
-    def show_objects(names: list[str]) -> str:
+    def show_objects(names: list[str], ctx: Context) -> str:
         """Show study objects in the 3D view, by name."""
-        return json.dumps(_strip_hidden(guarded(session.display)(names)), default=str)
+        return json.dumps(_strip_hidden(guarded(mine(ctx).display)(names)), default=str)
 
     @server.tool(annotations=builds, structured_output=False)
-    def hide_objects(names: list[str]) -> str:
+    def hide_objects(names: list[str], ctx: Context) -> str:
         """Hide study objects from the 3D view, by name."""
-        return json.dumps(_strip_hidden(guarded(session.hide)(names)), default=str)
+        return json.dumps(_strip_hidden(guarded(mine(ctx).hide)(names)), default=str)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True,
                                              open_world_hint=False), structured_output=False)
-    def delete_objects(names: list[str]) -> str:
+    def delete_objects(names: list[str], ctx: Context) -> str:
         """Remove objects this session built from the study, by name. They are left
         out of the saved script unless something kept still needs them."""
-        return json.dumps(_strip_hidden(guarded(session.forget)(names)), default=str)
+        return json.dumps(_strip_hidden(guarded(mine(ctx).forget)(names)), default=str)
 
     @server.tool(annotations=builds, structured_output=False)
-    def save_salome_script(path: str | None = None) -> str:
+    def save_salome_script(ctx: Context, path: str | None = None) -> str:
         """Write a standalone Python script that rebuilds what this session built
         (run it with `salome shell -- python3 result.py`, or File > Load Script).
         Without a path it goes to the session's folder. Returns where and the script."""
         def run():
-            target = session.save_script(path)
+            target = mine(ctx).save_script(path)
             return f"Saved {target}\n\n```python\n{target.read_text()}```"
         return guarded(run)()
 
     @server.tool(annotations=builds, structured_output=False)
-    def release_salome() -> str:
+    def release_salome(ctx: Context) -> str:
         """End this session on the SALOME agent server, so the SALOME chat window's
         Agentic assistant can use it. Objects stay in the study; save the script first
         if it is wanted."""
-        return session.release()
+        return mine(ctx).release()
 
     @server.tool(annotations=read_only, structured_output=False)
     def search_salome_docs(query: str, top_n: int = 5) -> str:
