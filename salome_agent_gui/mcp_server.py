@@ -127,6 +127,7 @@ class SalomeSession:
         self.run_id = None
         self.calls: list[dict] = []          # {module, tool, args, records}
         self.deleted: set[str] = set()
+        self._saved: set[Path] = set()      # files save_script may overwrite
 
     # connection
     def _open(self):
@@ -264,8 +265,14 @@ class SalomeSession:
         target = Path(os.path.expanduser(path)) if path else self._runs_dir / self.run_id / "result.py"
         if not target.is_absolute():
             raise SalomeError(f"give an absolute path, not {path!r}")
+        if target.suffix != ".py":
+            raise SalomeError(f"the script must be a .py file, not {target.name!r}")
+        mine = target.resolve().is_relative_to(self._runs_dir.resolve()) or target in self._saved
+        if target.exists() and not mine:
+            raise SalomeError(f"{target} already exists: give a new file name")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
+        self._saved.add(target)
         return target
 
 
@@ -614,7 +621,8 @@ def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSe
     def save_salome_script(ctx: Context, path: str | None = None) -> str:
         """Write a standalone Python script that rebuilds what this session built
         (run it with `salome shell -- python3 result.py`, or File > Load Script).
-        Without a path it goes to the session's folder. Returns where and the script."""
+        Without a path it goes to the session's folder; a path must be a new .py file
+        (or one this session saved). Returns where and the script."""
         def run():
             target = mine(ctx).save_script(path)
             return f"Saved {target}\n\n```python\n{target.read_text()}```"
