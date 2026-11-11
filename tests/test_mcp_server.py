@@ -586,3 +586,15 @@ def test_the_http_server_stops_with_salome():
     alive = ms.watch_parent(os.getpid(), interval=0.01, exit_fn=exits.append)
     alive.join(0.1)
     assert exits == [0] and alive.is_alive()
+
+
+def test_the_token_file_is_made_private_even_if_it_was_not(tmp_path):
+    p = tmp_path / "m.json"
+    ms.http_settings(p)
+    p.chmod(0o644)
+    ms.http_settings(p)
+    assert p.stat().st_mode & 0o777 == 0o600
+    p.write_text("{}")
+    p.chmod(0o644)
+    ms.http_settings(p)                                  # rewritten
+    assert p.stat().st_mode & 0o777 == 0o600

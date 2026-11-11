@@ -61,6 +61,7 @@ def _write_private(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)                       # the mode above applies only to a new file
     with os.fdopen(fd, "w") as f:
         json.dump(data, f)
     os.replace(tmp, path)
@@ -180,6 +181,7 @@ def mcp_settings(path: Path | None = None) -> dict:
     path = Path(path or mcp_settings_path())
     try:
         data = json.loads(path.read_text())
+        os.chmod(path, 0o600)                  # the token: never readable by other users
     except (OSError, ValueError):
         data = {}
     if not isinstance(data, dict):

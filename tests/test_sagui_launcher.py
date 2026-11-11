@@ -257,3 +257,17 @@ def test_mcp_dialog_shows_the_commands_and_status(qtbot):
                     timeout=2000)
     assert not stop.isEnabled()
     dlg.close()
+
+
+def test_the_mcp_token_file_is_made_private_even_if_it_was_not(tmp_path):
+    p = tmp_path / "m.json"
+    sl.mcp_settings(p)
+    p.chmod(0o644)
+    sl.mcp_settings(p)
+    assert p.stat().st_mode & 0o777 == 0o600
+    p.write_text("{}")
+    p.chmod(0o644)
+    (tmp_path / "m.json.tmp").write_text("")
+    (tmp_path / "m.json.tmp").chmod(0o644)
+    sl.mcp_settings(p)                       # rewritten through a stale .tmp
+    assert p.stat().st_mode & 0o777 == 0o600

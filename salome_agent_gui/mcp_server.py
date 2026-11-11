@@ -721,6 +721,7 @@ def http_settings(path: Path | None = None, port: int | None = None) -> dict:
     path = Path(path or HTTP_FILE)
     try:
         data = json.loads(path.read_text())
+        os.chmod(path, 0o600)                  # the token: never readable by other users
     except (OSError, ValueError):
         data = {}
     if not isinstance(data, dict):
@@ -735,6 +736,7 @@ def http_settings(path: Path | None = None, port: int | None = None) -> dict:
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)                   # the mode above applies only to a new file
         with os.fdopen(fd, "w") as f:
             json.dump({"port": data["port"], "token": data["token"]}, f)
     return {"port": data["port"], "token": data["token"]}
