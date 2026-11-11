@@ -391,10 +391,13 @@ class DocSearch:
                                 top_n=top_n, char_budget=config.agentic.section_char_budget,
                                 k=15)
 
+        db = Path(config.chromadb_path)
         return {"search": search, "read": parse_page,
                 "pages": {p["filename"]: p for p in pages},
                 "max_chars": config.agentic.max_chars_per_page,
-                "online": online_roots(rag_backend.resolve_extraction(data, path))}
+                "online": online_roots(rag_backend.resolve_extraction(data, path)),
+                # a rebuilt index or an edited config is loaded again
+                "watch": [str(path), str(index_file), str(db), str(db / "chroma.sqlite3")]}
 
     def _online(self, entry: dict) -> str:
         """The page on docs.salome-platform.org, from the module's citation URL
@@ -413,9 +416,13 @@ class DocSearch:
 
     def _get(self) -> dict:
         with self._lock:
+            state = self._state
+            if state is not None and _stamp(state.get("watch")) != state.get("stamp"):
+                self._state = None
             if self._state is None:
                 with contextlib.redirect_stdout(sys.stderr):
-                    self._state = self._loader(self.config_path())
+                    state = self._loader(self.config_path())
+                self._state = dict(state, stamp=_stamp(state.get("watch")))
             return self._state
 
     def search(self, query: str, top_n: int = 5) -> str:
@@ -456,6 +463,16 @@ class DocSearch:
         except Exception as e:  # noqa: BLE001
             return {"ready": False, "error": str(e)}
         return {"config": str(path), "loaded": self._state is not None}
+
+
+def _stamp(paths) -> tuple:
+    out = []
+    for p in paths or ():
+        try:
+            out.append(Path(p).stat().st_mtime_ns)
+        except OSError:
+            out.append(None)
+    return tuple(out)
 
 
 def online_roots(extraction: dict) -> dict:
