@@ -582,6 +582,15 @@ def test_saving_models_keeps_both_embeddings_identical_and_respects_a_parked_rer
     assert json.loads(path.read_text())["rag"]["chatbot"]["embedding"]["model"] != "x"
 
 
+def test_saving_models_with_a_null_extraction_section_rebuilds_it(tmp_path):
+    data = json.loads(EXAMPLE.read_text())
+    data["rag"]["extraction"] = None
+    path = write_cfg(tmp_path, data)
+    cs.save_settings(path, {"rag_models": {"embedding_model": "BAAI/bge-small-en-v1.5"}})
+    rag = json.loads(path.read_text())["rag"]
+    assert rag["extraction"]["embedding"]["model"] == "BAAI/bge-small-en-v1.5"
+
+
 def test_doc_conversation_names_the_missing_model_before_raglib_fails(bridges, hf_cache, tmp_path):
     import shutil
     shutil.rmtree(hf_cache)

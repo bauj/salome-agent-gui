@@ -414,7 +414,9 @@ def _save_rag_models(data: dict, fields: dict) -> None:
     chatbot = rag["chatbot"]
     emb = str(fields.get("embedding_model") or "").strip()
     if emb:
-        for section in (chatbot, rag.setdefault("extraction", {})):
+        if not isinstance(rag.get("extraction"), dict):
+            rag["extraction"] = {}
+        for section in (chatbot, rag["extraction"]):
             if not isinstance(section.get("embedding"), dict):
                 section["embedding"] = {"model": emb, "type": "local", "base_url": None, "api_key": None}
             section["embedding"]["model"] = emb
