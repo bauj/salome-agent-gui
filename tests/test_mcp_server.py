@@ -176,6 +176,8 @@ def test_no_agent_server_says_how_to_start_it(tmp_path, monkeypatch):
     server = ms.build_server(session, ms.DocSearch(loader=lambda p: FAKE_DOCS))
     r = call(server, "list_study")
     assert r.is_error and "Tools > Plugins > AI tools > MCP server" in text(r)
+    call(server, "list_study")
+    assert list(tmp_path.iterdir()) == []              # no empty run folder per failed try
 
 
 def test_a_busy_server_says_who_holds_it_not_how_to_start_it(tmp_path, monkeypatch):

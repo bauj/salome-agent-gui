@@ -143,7 +143,12 @@ class SalomeSession:
         run_id = uuid.uuid4().hex[:12]
         run_dir = self._runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        self.client = self._connect(run_id, str(run_dir))
+        try:
+            self.client = self._connect(run_id, str(run_dir))
+        except BaseException:
+            with contextlib.suppress(OSError):
+                run_dir.rmdir()                  # only if the failed connect left it empty
+            raise
         self.run_id = run_id
         self.calls, self.deleted = [], set()
 
