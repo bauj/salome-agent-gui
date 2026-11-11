@@ -273,7 +273,7 @@ class RagSession:
             raise RagError(f"{e}; {INSTALL_HINT}") from e
         config = _load_config(ChatbotConfig, chatbot)
         db = Path(config.chromadb_path)
-        if not db.exists():
+        if not config.chromadb_path or not db.exists():
             raise RagError(f"no documentation index at {db}: build it first "
                            "(Settings > Documentation > Build index)")
         self.config = config

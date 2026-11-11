@@ -336,6 +336,17 @@ def test_doc_search_without_rag_section_or_models_says_what_to_do(tmp_path, hf_c
              "search_salome_docs", {"query": "box"})
     assert r.is_error and "not installed: all-MiniLM-L6-v2" in text(r)
     assert "Settings > Local models" in text(r)
+    cfg.write_text("{broken json")
+    r = call(ms.build_server(ms.SalomeSession(runs_dir=tmp_path), ms.DocSearch(cfg)),
+             "search_salome_docs", {"query": "box"})
+    assert r.is_error and str(cfg) in text(r)
+    example["rag"]["chatbot"]["embedding_model"] = ""
+    example["rag"]["chatbot"]["reranker_enabled"] = False
+    example["rag"]["chatbot"][" null_bad "] = 1
+    cfg.write_text(json.dumps(example))
+    r = call(ms.build_server(ms.SalomeSession(runs_dir=tmp_path), ms.DocSearch(cfg)),
+             "search_salome_docs", {"query": "box"})
+    assert r.is_error
 
 
 # ---- over stdio, as Claude Desktop runs it ----------------------------------

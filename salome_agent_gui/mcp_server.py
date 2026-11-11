@@ -353,8 +353,11 @@ class DocSearch:
     def _load(self, path: Path) -> dict:
         from salome_agent_gui import rag_backend, rag_models
 
-        data = json.loads(Path(path).read_text())
-        if not isinstance(data.get("rag"), dict):
+        try:
+            data = json.loads(Path(path).read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            raise SalomeError(f"{path}: {e}") from e
+        if not isinstance(data, dict) or not isinstance(data.get("rag"), dict):
             raise SalomeError(f"{path} has no rag section: open the documentation modes in the "
                               "SALOME chat window once, or copy it from config.example.json")
         absent = rag_models.missing(data)
@@ -367,26 +370,34 @@ class DocSearch:
         llm = data.setdefault("llm", {})
         llm["base_url"] = llm.get("base_url") or "http://127.0.0.1:9/v1"
         llm["model"] = llm.get("model") or "unused"
-        chatbot = rag_backend.resolve_chatbot(data, path)
-        if not isinstance(chatbot.get("agentic"), dict):
-            raise SalomeError('search needs rag.chatbot.agentic (its page_index_path) in the config')
-        rag_backend.ensure_path()
-        # raglib prints progress to stdout, the MCP channel: send it to stderr
-        with contextlib.redirect_stdout(sys.stderr):
-            try:
-                from core import ChatbotConfig, DocumentationChatbot
-                from html_parser import parse_page, search_pages
-            except ImportError as e:
-                raise SalomeError(f"{e}; {rag_backend.INSTALL_HINT}") from e
-            config = rag_backend._load_config(ChatbotConfig, chatbot)
-            if not Path(config.chromadb_path).exists():
-                raise SalomeError(f"no documentation index at {config.chromadb_path}: build it "
-                                  "in the SALOME chat window (Settings > Build index)")
-            bot = DocumentationChatbot(config)
-        index_file = Path(config.agentic.page_index_path)
-        if not index_file.exists():
-            raise SalomeError(f"no page index at {index_file}: build the index again")
-        pages = json.loads(index_file.read_text())
+        try:
+            chatbot = rag_backend.resolve_chatbot(data, path)
+            if not isinstance(chatbot.get("agentic"), dict):
+                raise SalomeError(
+                    'search needs rag.chatbot.agentic (its page_index_path) in the config')
+            rag_backend.ensure_path()
+            # raglib prints progress to stdout, the MCP channel: send it to stderr
+            with contextlib.redirect_stdout(sys.stderr):
+                try:
+                    from core import ChatbotConfig, DocumentationChatbot
+                    from html_parser import parse_page, search_pages
+                except ImportError as e:
+                    raise SalomeError(f"{e}; {rag_backend.INSTALL_HINT}") from e
+                config = rag_backend._load_config(ChatbotConfig, chatbot)
+                if not config.chromadb_path or not Path(config.chromadb_path).exists():
+                    raise SalomeError(
+                        f"no documentation index at {config.chromadb_path}: build it "
+                        "in the SALOME chat window (Settings > Build index)")
+                bot = DocumentationChatbot(config)
+            index_file = Path(config.agentic.page_index_path)
+            if not config.agentic.page_index_path or not index_file.is_file():
+                raise SalomeError(f"no page index at {index_file}: build the index again")
+            pages = json.loads(index_file.read_text())
+            online = online_roots(rag_backend.resolve_extraction(data, path))
+        except SalomeError:
+            raise
+        except (rag_backend.RagError, OSError, ValueError, TypeError, KeyError) as e:
+            raise SalomeError(str(e)) from e
         score = bot.score_against_query if bot.reranker is not None else None
 
         def search(query: str, top_n: int):
@@ -400,7 +411,7 @@ class DocSearch:
         return {"search": search, "read": parse_page,
                 "pages": {p["filename"]: p for p in pages},
                 "max_chars": config.agentic.max_chars_per_page,
-                "online": online_roots(rag_backend.resolve_extraction(data, path)),
+                "online": online,
                 # a rebuilt index or an edited config is loaded again
                 "watch": [str(path), str(index_file), str(db), str(db / "chroma.sqlite3")]}
 
