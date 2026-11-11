@@ -840,18 +840,20 @@ function renderRagInfo(r) {
   $("rag-index").textContent = r.configured ? (r.index || "rag.chatbot.chromadb_path is not set")
     : "No rag section in this configuration yet: choose a documentation mode and save to add one.";
   const line = $("rag-index-state");
+  setIndex({ building: !!r.building, job: "models", line: r.models_line });
+  if (!r.building && r.models_line) $("models-job").classList.add("warn");   // a failed download
   if (r.building && r.job !== "models") {
     setIndex({ building: true, job: "index", line: r.line });
     return;
   }
-  setIndex({ building: !!r.building, job: "models", line: r.models_line });
-  if (!r.building && r.models_line) $("models-job").classList.add("warn");   // a failed download
   line.className = "idx-state";
   line.textContent = "";
   if (!r.configured) return;
-  line.textContent = r.index_exists ? "Index found." + (r.line ? ` Last build: ${r.line}.` : "")
-    : "No index yet: build it before asking questions.";
-  line.classList.add(r.index_exists ? "ok" : "warn");
+  const last = r.line ? ` Last build: ${r.line}.` : "";
+  line.textContent = (r.index_exists ? "Index found."
+    : "No index yet: build it before asking questions.") + last;
+  const failed = (r.line || "").startsWith("failed");
+  line.classList.add(r.index_exists && !failed ? "ok" : "warn");
 }
 
 function setStatus(p) {

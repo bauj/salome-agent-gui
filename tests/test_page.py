@@ -771,6 +771,20 @@ def test_build_index_button_and_progress(qtbot, page):
     wait_js(qtbot, view, "document.getElementById('btn-build-index').disabled")
     assert run_js(qtbot, view, "document.getElementById('rag-index-state').textContent") == \
         "GEOM: 120 pages"
+    rag_fail_none = dict(DOC_SETTINGS["rag"], index_exists=False, building=False,
+                         line="failed (exit 1)")
+    fake.emit("setSettings", dict(DOC_SETTINGS, rag=rag_fail_none))
+    wait_js(qtbot, view, "!document.getElementById('btn-build-index').disabled")
+    assert "failed (exit 1)" in run_js(
+        qtbot, view, "document.getElementById('rag-index-state').textContent")
+    assert run_js(qtbot, view,
+                  "document.getElementById('rag-index-state').classList.contains('warn')") is True
+    rag_fail_existing = dict(DOC_SETTINGS["rag"], index_exists=True, building=False,
+                             line="failed (exit 2)")
+    fake.emit("setSettings", dict(DOC_SETTINGS, rag=rag_fail_existing))
+    wait_js(qtbot, view, "document.getElementById('rag-index-state').textContent.includes('exit 2')")
+    assert run_js(qtbot, view,
+                  "document.getElementById('rag-index-state').classList.contains('warn')") is True
 
 
 # ---- the settings drawer follows the Assistant select ---------------------
