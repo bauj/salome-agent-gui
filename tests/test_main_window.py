@@ -36,7 +36,8 @@ def make(qtbot, cfg_path, rec, **kw):
 
 def test_window_hosts_the_factory_view_and_its_bridge(qtbot, cfg_path):
     w, made = make(qtbot, cfg_path, {})
-    assert isinstance(w.centralWidget(), QLabel)
+    assert isinstance(w.view, QLabel) and w.tabs.widget(0) is w.view
+    assert w.centralWidget() is w.tabs and w.tabs.tabBar().isHidden()
     assert made["bridge"] is w.bridge
     assert w.bridge.connected is True            # start() probed once
 
@@ -165,3 +166,27 @@ def test_app_takes_the_menu_family_out_of_qts_arguments():
     assert split_family(["prog", "--mode", "rag", "-style", "x"]) == ("rag", ["prog", "-style", "x"])
     assert split_family(["prog", "--mode=agent"]) == ("agent", ["prog"])
     assert split_family(["prog"]) == (None, ["prog"])
+
+
+
+def test_doc_links_open_in_new_tabs_of_the_window(qtbot, cfg_path, monkeypatch):
+    from salome_agent_gui import doc_browser
+
+    opened = []
+    monkeypatch.setattr(doc_browser, "available", lambda: True)
+    w, _ = make(qtbot, cfg_path, {})
+    monkeypatch.setattr(w.tabs, "open", opened.append)
+    w.open_doc("/docs/a.html")
+    w.open_doc("https://example.org/b")
+    assert opened == ["/docs/a.html", "https://example.org/b"]
+
+
+def test_doc_links_go_to_the_system_browser_without_webengine(qtbot, cfg_path, monkeypatch):
+    from salome_agent_gui import doc_browser
+
+    external = []
+    monkeypatch.setattr(doc_browser, "available", lambda: False)
+    monkeypatch.setattr(doc_browser, "open_externally", external.append)
+    w, _ = make(qtbot, cfg_path, {})
+    w.open_doc("/docs/a.html")
+    assert external == ["/docs/a.html"] and w.tabs.count() == 1

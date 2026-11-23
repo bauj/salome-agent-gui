@@ -16,6 +16,7 @@ const ICON = {
   approve: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>',
 };
 const STEP = { ok: ["st ok", "ok"], running: ["st run", "run"], failed: ["st fail", "fail"],
                skipped: ["st skip", "skip"], pending: ["st pend", null],
@@ -117,6 +118,64 @@ function userNode(text, images) {
   return d;
 }
 function noteNode(text) { return el("div", "note", text); }
+
+// ---- background jobs (index build, model download): a live log card ---------
+const JOB_KEEP = 500;          // lines a card keeps, as the bridge does
+
+function jobHead(card) {
+  const head = card.querySelector(".job-head");
+  head.textContent = "";
+  const state = card.dataset.state;
+  const icon = el("span", "st " + ({ running: "run", ok: "ok", failed: "fail" }[state] || "pend"));
+  svg(icon, state === "ok" ? "ok" : state === "failed" ? "fail" : "run");
+  head.appendChild(icon);
+  head.appendChild(el("span", "job-title", card.dataset.title));
+  head.appendChild(el("span", "job-count",
+    state === "running" ? "running…" : state === "ok" ? "done" : "failed"));
+}
+
+function jobNode(p) {
+  const card = el("details", "job-log " + (p.state || "running"));
+  card.dataset.job = p.id;
+  card.dataset.title = p.title || "";
+  card.dataset.state = p.state || "running";
+  card.open = (p.state || "running") !== "ok";
+  const sum = el("summary", "job-head");
+  card.appendChild(sum);
+  const pre = el("pre", "job-lines");
+  pre.textContent = (p.lines || []).join("\n");
+  card.appendChild(pre);
+  jobHead(card);
+  return card;
+}
+
+function jobCard(id) { return col().querySelector(`.job-log[data-job="${id}"]`); }
+
+function addJob(p) {
+  append(jobNode(p));
+  const pre = jobCard(p.id).querySelector(".job-lines");
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function jobLine(p) {
+  const card = jobCard(p.id);
+  if (!card) return;
+  const pre = card.querySelector(".job-lines");
+  const stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  const lines = pre.textContent ? pre.textContent.split("\n") : [];
+  lines.push(p.line);
+  pre.textContent = lines.slice(-JOB_KEEP).join("\n");
+  if (stick) pre.scrollTop = pre.scrollHeight;
+}
+
+function jobState(p) {
+  const card = jobCard(p.id);
+  if (!card) return;
+  card.dataset.state = p.state;
+  card.className = "job-log " + p.state;
+  if (p.state === "failed") card.open = true;
+  jobHead(card);
+}
 
 function btn(label, cls, action, onClick, icon) {
   const b = el("button", "btn" + (cls ? " " + cls : ""));
@@ -522,8 +581,67 @@ function inlineLines(parent, lines) {
   return parent;
 }
 
-function markdownNode(text) {
+// ---- code blocks of the documentation answers, run in SALOME ----------------
+const codeRuns = {};          // key -> {state: running|ok|failed, text}: the bridge's codeRun pushes
+const PY_LANGS = ["python", "py", "python3"];
+
+function runnableCode(lang, body) {
+  if (lang) return PY_LANGS.includes(lang.toLowerCase());
+  return /^\s*(import|from)\s+[\w.]+/m.test(body);  // an unlabelled block that reads as Python
+}
+
+function drawCodeRun(bar) {
+  const key = bar.dataset.key;
+  const run = codeRuns[key];
+  bar.textContent = "";
+  if (bar.dataset.confirm) {
+    bar.appendChild(el("span", "code-run-ask", "Run this code in the open SALOME study?"));
+    bar.appendChild(btn("Run", "primary small", "run-confirm", () => {
+      delete bar.dataset.confirm;
+      codeRuns[key] = { state: "running", text: "" };
+      drawCodeRun(bar);
+      bridge.runCode(key, bar.codeText);
+    }));
+    bar.appendChild(btn("Cancel", "ghost small", "run-cancel", () => {
+      delete bar.dataset.confirm;
+      drawCodeRun(bar);
+    }));
+    return;
+  }
+  const running = run && run.state === "running";
+  const b = btn(running ? "Running in SALOME…" : "Run in SALOME", "small", "run-code", () => {
+    bar.dataset.confirm = "1";
+    drawCodeRun(bar);
+  }, running ? "run" : "play");
+  b.disabled = !!running;
+  bar.appendChild(b);
+  if (run && !running) {
+    const out = el("div", "code-run-out " + (run.state === "ok" ? "ok" : "failed"));
+    svg(out, run.state === "ok" ? "ok" : "fail");
+    out.appendChild(el("span", null, run.text));
+    bar.appendChild(out);
+  }
+}
+
+function codeRunBar(key, code) {
+  const bar = el("div", "code-run");
+  bar.dataset.key = key;
+  bar.codeText = code;
+  drawCodeRun(bar);
+  return bar;
+}
+
+function codeRun(p) {
+  codeRuns[p.key] = { state: p.state, text: p.text || "" };
+  for (const bar of document.querySelectorAll(".code-run")) {
+    if (bar.dataset.key === p.key) drawCodeRun(bar);
+  }
+}
+
+// `runKey`: a documentation answer's turn id; its Python blocks get a "Run in SALOME" bar
+function markdownNode(text, runKey) {
   const root = el("div", "answer");
+  let blocks = 0;
   const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
   let i = 0;
   const isList = (l) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
@@ -541,6 +659,11 @@ function markdownNode(text) {
       if (fence[1]) code.dataset.lang = fence[1];
       pre.appendChild(code);
       root.appendChild(pre);
+      const source = body.join("\n");
+      if (runKey !== undefined && source.trim() && runnableCode(fence[1], source)) {
+        root.appendChild(codeRunBar(`${runKey}:${blocks}`, source));
+      }
+      blocks += 1;
       continue;
     }
     const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
@@ -607,7 +730,8 @@ function answerCard(vm) {
     card.appendChild(el("div", "answer-warn",
       "The model's answer could not be checked against the pages it read; these are the pages to look at."));
   }
-  card.appendChild(markdownNode(r.answer || "(empty answer)"));
+  // only the agentic RAG answers offer to run their Python blocks in SALOME
+  card.appendChild(markdownNode(r.answer || "(empty answer)", r.agentic ? vm.id : undefined));
   if (r.sources && r.sources.length) {
     const d = el("details", "sources");
     d.open = true;
@@ -699,6 +823,7 @@ function replay(p) {
   for (const it of p.items) {
     if (it.type === "user") col().appendChild(userNode(it.text, it.images));
     else if (it.type === "note") col().appendChild(noteNode(it.text));
+    else if (it.type === "job") col().appendChild(jobNode(it));
     else col().appendChild(turnNode(it.vm));
   }
   restoreReasoningScroll(col());
@@ -1459,6 +1584,10 @@ const handlers = {
   setSettings,
   setTheme,
   setIndex,
+  addJob,
+  jobLine,
+  jobState,
+  codeRun,
   reset: () => { col().textContent = ""; updateEmpty(); },
   replay,
 };

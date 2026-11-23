@@ -756,3 +756,80 @@ def test_an_agent_conversation_keeps_the_window_on_its_family(qtbot, bridges, cf
     assert not b.set_family("rag")
     assert b.family == "agent" and _saved_mode(cfg_path) == "agent"
     assert "New conversation" in json.dumps(p.items[-5:])
+
+
+def test_run_code_runs_once_at_a_time_and_tells_the_page(qtbot, bridges, cfg_path):
+    gate = threading.Event()
+    ran = []
+
+    def run(code):
+        ran.append(code)
+        gate.wait(3)
+        return {"ok": False, "text": "NameError: x"}
+
+    b, p = make(bridges, cfg_path, {}, code_run_fn=run)
+    b.runCode("3:0", "x")
+    assert p.last("codeRun") == {"key": "3:0", "state": "running", "text": ""}
+    b.runCode("3:1", "y")                               # refused while the first runs
+    assert p.last("codeRun")["key"] == "3:1" and p.last("codeRun")["state"] == "failed"
+    gate.set()
+    qtbot.waitUntil(lambda: p.last("codeRun")["key"] == "3:0"
+                    and p.last("codeRun")["state"] != "running", timeout=3000)
+    assert p.last("codeRun") == {"key": "3:0", "state": "failed", "text": "NameError: x"}
+    assert ran == ["x"]
+    b.runCode("3:0", "   ")                            # an empty block is ignored
+    assert ran == ["x"]
+    # a reloaded page gets the runs back after the replay
+    p.items.clear()
+    b.ready()
+    assert p.names()[-1] == "codeRun" and p.last("codeRun")["state"] == "failed"
+
+
+def test_run_code_reports_an_exception_of_the_run_function(qtbot, bridges, cfg_path):
+    b, p = make(bridges, cfg_path, {}, code_run_fn=lambda code: 1 / 0)
+    b.runCode("0:0", "x = 1")
+    qtbot.waitUntil(lambda: p.last("codeRun")["state"] == "failed", timeout=3000)
+    assert "ZeroDivisionError" in p.last("codeRun")["text"]
+
+
+class _Client:
+    def __init__(self, resp):
+        self.resp, self.closed, self.calls = resp, False, []
+
+    def run(self, code, timeout, module=None):
+        self.calls.append((code, timeout))
+        if isinstance(self.resp, Exception):
+            raise self.resp
+        return self.resp
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize("resp, ok, text", [
+    ({"ok": True}, True, "Ran in SALOME."),
+    ({"ok": False, "exception": "boom", "traceback": "Traceback...\nValueError: boom\n"}, False,
+     "Traceback...\nValueError: boom"),
+    ({"ok": False, "error": "run is disabled on this server (start it with --allow-run)"}, False,
+     "Documentation (RAG)"),
+    (OSError("socket"), False, "did not finish: socket"),
+])
+def test_run_in_salome_sends_the_code_and_reads_the_answer(monkeypatch, resp, ok, text):
+    from salome_agent import server_conn
+    from salome_agent_gui import bridge as bridge_mod
+
+    client = _Client(resp)
+    monkeypatch.setattr(server_conn, "connect", lambda run_id, **kw: client)
+    out = bridge_mod.run_in_salome("x = 1")
+    assert out["ok"] is ok and text in out["text"]
+    assert client.calls == [("x = 1", bridge_mod.CODE_RUN_TIMEOUT)] and client.closed
+
+
+def test_run_in_salome_without_a_server(monkeypatch):
+    from salome_agent import server_conn
+    from salome_agent_gui import bridge as bridge_mod
+
+    def refuse(run_id, **kw):
+        raise server_conn.ServerUnavailable("No SALOME agent server running.")
+    monkeypatch.setattr(server_conn, "connect", refuse)
+    assert bridge_mod.run_in_salome("x") == {"ok": False, "text": "No SALOME agent server running."}

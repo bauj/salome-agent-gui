@@ -8,7 +8,7 @@ from PyQt5.QtCore import QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices, QPalette
 from PyQt5.QtWidgets import QMainWindow
 
-from salome_agent_gui import config_store, dialogs, web_view
+from salome_agent_gui import config_store, dialogs, doc_browser, web_view
 from salome_agent_gui.bridge import Bridge
 
 
@@ -83,13 +83,16 @@ class MainWindow(QMainWindow):
                              edit_plan=edit_plan or dialogs.edit_plan,
                              edit_config=dialogs.edit_config, pick_config=dialogs.pick_config,
                              open_file=_open_file, open_url=_open_url,
+                             open_doc=self.open_doc,
                              system_dark=system_dark or self._palette_is_dark,
                              dialog_parent=self, family=family, parent=self)
         self.bridge.close_ready.connect(self._close_now)
         if notice:
             self.bridge.note(notice)
         self.view = (view_factory or web_view.create)(self, self.bridge)
-        self.setCentralWidget(self.view)
+        # the chat, then a tab per documentation page opened from it
+        self.tabs = doc_browser.WindowTabs(self.view, self)
+        self.setCentralWidget(self.tabs)
         self.bridge.start()
 
         self._request_file = request_file or request_path()
@@ -114,12 +117,20 @@ class MainWindow(QMainWindow):
             self._parent_watch.timeout.connect(self._check_parent)
             self._parent_watch.start()
 
+    def open_doc(self, target: str) -> None:
+        """A documentation link, in a new tab of this window."""
+        if not doc_browser.available():         # no Qt WebEngine
+            doc_browser.open_externally(target)
+            return
+        self.tabs.open(target)
+
     def _check_request(self):
         family = take_request(self._request_file)
         if family is None:
             return
         if family:
             self.bridge.set_family(family)
+        self.tabs.setCurrentIndex(0)             # the menu entry brings the chat back
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -143,6 +154,7 @@ class MainWindow(QMainWindow):
                 config_store.save_window_geometry(bytes(self.saveGeometry()))
             except OSError:
                 pass
+            self.tabs.close_docs()
             super().closeEvent(e)
             return
         e.ignore()

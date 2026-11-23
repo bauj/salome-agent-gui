@@ -383,6 +383,9 @@ class Pushes:
         found = [p for n, p in self.items if n == name]
         return found[-1] if found else None
 
+    def all(self, name):
+        return [p for n, p in self.items if n == name]
+
 
 def fake_install(cache, repo):
     """A model as huggingface_hub leaves it in its cache."""
@@ -469,6 +472,19 @@ def test_open_link_opens_cited_pages_and_web_links_only(qtbot, bridges, tmp_path
     assert b.opened == ["/docs/smesh/page.html", "https://example.org/x"]
 
 
+def test_doc_links_open_in_the_window_browser_when_it_has_one(qtbot, bridges, tmp_path):
+    docs = []
+    b, p = make(bridges, write_cfg(tmp_path, rag_cfg()), {}, open_doc=docs.append)
+    b.send("q")
+    qtbot.waitUntil(lambda: not b.busy, timeout=3000)
+    b.openLink("/docs/smesh/page.html")
+    b.openLink("/etc/passwd")
+    b.openLink("https://example.org/x")
+    b.openLink("file:///etc/passwd")
+    assert docs == ["/docs/smesh/page.html", "https://example.org/x"]
+    assert b.opened == []                                # nothing went to the system browser
+
+
 def test_a_bad_rag_config_stops_the_conversation_start(bridges, tmp_path):
     data = rag_cfg()
     del data["rag"]
@@ -493,6 +509,25 @@ def test_build_index_reports_progress_and_the_result(qtbot, bridges, tmp_path):
     assert p.last("setIndex") == {"building": True, "job": "index", "line": "indexing GEOM"}
     assert p.last("addNote")["text"] == "Documentation index built."
     assert p.last("setSettings")["rag"]["building"] is False
+
+
+def test_build_index_shows_its_messages_in_a_log_card(qtbot, bridges, tmp_path):
+    def build(path, *, on_line, cancel):
+        on_line("Processing GEOM")
+        on_line("    Found 120 files")
+        return 3
+
+    b, p = make(bridges, write_cfg(tmp_path, rag_cfg()), {}, build_index_fn=build)
+    b.buildIndex()
+    qtbot.waitUntil(lambda: b.indexer is None, timeout=3000)
+    card = p.last("addJob")
+    assert card["job"] == "index" and card["title"] == "Building the documentation index"
+    assert [x["line"] for x in p.all("jobLine")] == ["Processing GEOM", "    Found 120 files"]
+    assert p.last("jobState") == {"id": card["id"], "state": "failed"}
+    b.ready()                                            # a reloaded page gets the whole log back
+    jobs = [i for i in p.last("replay")["items"] if i["type"] == "job"]
+    assert jobs == [{"type": "job", "id": card["id"], "job": "index", "title": card["title"],
+                     "state": "failed", "lines": ["Processing GEOM", "    Found 120 files"]}]
 
 
 def test_build_index_is_refused_while_a_doc_conversation_is_open(qtbot, bridges, tmp_path):

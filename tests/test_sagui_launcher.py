@@ -173,11 +173,34 @@ def test_run_opens_the_window_on_the_menu_family(monkeypatch, tmp_path):
     assert seen == [("--mode", "agent"), ("--mode", "rag"), (), ()]
 
 
-def test_run_rag_needs_no_agent_server(monkeypatch):
-    monkeypatch.setattr(sl, "ensure_server", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+def test_run_rag_opens_the_window_even_when_the_agent_server_cannot_start(monkeypatch):
+    monkeypatch.setattr(sl, "ensure_server", lambda *a, **k: (_ for _ in ()).throw(RuntimeError))
+    monkeypatch.setattr(sl, "allow_code_runs", lambda: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
+    opened = []
+    monkeypatch.setattr(sl, "launch_window", lambda *a, **k: opened.append(1))
+    assert sl.run("ctx", "rag") == "" and opened == [1]
+    monkeypatch.setattr(sl, "ensure_server", lambda *a, **k: "foreign")   # another SALOME's server
+    assert sl.run("ctx", "rag") == "" and opened == [1, 1]
+
+
+def test_run_lets_the_server_run_code_only_for_the_documentation_modes(monkeypatch):
+    monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "started")
     monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: None)
-    assert sl.run("ctx", "rag") == ""
+    allowed = []
+    monkeypatch.setattr(sl, "allow_code_runs", lambda: allowed.append(1) or True)
+    sl.run("ctx", "agent")
+    assert allowed == []
+    sl.run("ctx", "rag")
+    sl.run("ctx", None)
+    assert allowed == [1, 1]
+
+
+def test_allow_code_runs_switches_the_running_core():
+    core = types.SimpleNamespace(allow_run=False)
+    assert sl.allow_code_runs(types.SimpleNamespace(_CORE=core)) is True and core.allow_run
+    assert sl.allow_code_runs(types.SimpleNamespace(_CORE=None)) is False
 
 
 def test_mcp_settings_are_created_once_and_private(tmp_path):

@@ -153,15 +153,38 @@ def _server_problem(context, what: str) -> str:
             "see the Messages window.")
 
 
+def allow_code_runs(gui_plugin=None) -> bool:
+    """Let this SALOME's agent server run the code sent with its token: the
+    documentation answers' "Run in SALOME" button needs it. Stays on until the
+    server stops (SALOME closes or the server is restarted)."""
+    if gui_plugin is None:
+        from agent_server import gui_plugin
+    core = getattr(gui_plugin, "_CORE", None)
+    if core is None or not hasattr(core, "allow_run"):
+        return False
+    core.allow_run = True
+    return True
+
+
 def run(context, family: str | None = None) -> str:
     """Open the chat window on `family` ("agent": the Agentic assistant, "rag":
     the documentation modes), or bring the open one to it. A message for the
     user, or "" when done."""
     family = family if family in FAMILIES else None
-    if family != "rag":               # the documentation modes need no agent server
+    if family == "rag":
+        # the documentation modes answer without the agent server; only their
+        # "Run in SALOME" button uses it, so a server that cannot start is no error
+        try:
+            if ensure_server(context) != "foreign":
+                allow_code_runs()
+        except Exception:                      # noqa: BLE001
+            pass
+    else:
         problem = _server_problem(context, "The chat window")
         if problem:
             return problem
+        if family is None:                     # every mode, the documentation ones too
+            allow_code_runs()
     path = pid_path()
     if window_alive(path):
         request_family(family or "")
@@ -209,7 +232,7 @@ def client_commands(port: int, token: str) -> dict:
             "Gemini CLI": f'gemini mcp add --scope user --transport http --header "{auth}" '
                           f'{MCP_NAME} {url}',
             "Antigravity (agy)": f'agy mcp add --header "{auth}" {MCP_NAME} {url}',
-            "Other MCP clients": f"URL {url}, header {auth}"}
+            "Other MCP clients (Claude Desktop, ChatGPT, Antigravity Desktop, etc.)": f"URL {url}, header {auth}"}
 
 
 def port_open(port: int, timeout: float = 0.2) -> bool:
@@ -260,15 +283,20 @@ def stop_mcp() -> bool:
 
 _DIALOG = None      # the open MCP dialog, kept alive (it is not modal)
 
+# the status line's dot, by state
+_STATUS_COLORS = {"running": "#2e7d32", "starting": "#ef8f00", "stopped": "#9e9e9e"}
+
 
 def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_fn=None):
     """A small window: whether the MCP server listens, and the commands that
     connect Claude Code, Gemini CLI or another client to it. Closing it leaves
-    the server running."""
+    the server running. It is a top-level window of its own (no transient
+    parent), so it can be minimized apart from SALOME; it closes with `parent`."""
     from PyQt5.QtCore import Qt, QTimer
-    from PyQt5.QtGui import QFont, QGuiApplication
-    from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QGridLayout, QLabel, QLineEdit,
-                                 QPushButton, QVBoxLayout)
+    from PyQt5.QtGui import QFont, QGuiApplication, QIcon
+    from PyQt5.QtWidgets import (QApplication, QDialogButtonBox, QFrame, QGridLayout,
+                                 QGroupBox, QLabel, QLineEdit, QPushButton,
+                                 QSizePolicy, QStyle, QVBoxLayout, QWidget)
 
     global _DIALOG
     alive_fn = alive_fn or (lambda: process_alive(mcp_pid_path()))
@@ -279,65 +307,143 @@ def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_f
             _DIALOG.close()
         except RuntimeError:
             pass
-    dlg = QDialog(parent)
+    dlg = QWidget(None, Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
+                  | Qt.WindowMinimizeButtonHint | Qt.WindowCloseButtonHint)
+    dlg.setObjectName("mcp-dialog")
     dlg.setWindowTitle(f"{TITLE}: MCP server")
     dlg.setAttribute(Qt.WA_DeleteOnClose)
-    dlg.setMinimumWidth(720)
+    dlg.setMinimumWidth(860)
+    if parent is not None:
+        dlg.setWindowIcon(parent.windowIcon())
+        # no Qt parent (a transient window cannot be minimized on its own under
+        # most window managers), but it does not outlive SALOME's main window
+        parent.destroyed.connect(dlg.close)
+    app = QApplication.instance()
+    if app is not None:
+        app.aboutToQuit.connect(dlg.close)
+    dlg.setStyleSheet(
+        "QGroupBox { font-weight: bold; border: 1px solid palette(mid); border-radius: 6px;"
+        " margin-top: 10px; padding: 10px 8px 8px 8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        "QGroupBox QLabel, QGroupBox QLineEdit, QGroupBox QPushButton { font-weight: normal; }"
+        "QFrame#mcp-header { background: palette(alternate-base); border: 1px solid palette(mid);"
+        " border-radius: 6px; }"
+        "QLineEdit[readOnly=\"true\"] { padding: 3px 6px; }")
     lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(14, 14, 14, 10)
+    lay.setSpacing(10)
     url = mcp_url(info["port"])
+
+    # header: the title and the live status
+    header = QFrame()
+    header.setObjectName("mcp-header")
+    head = QVBoxLayout(header)
+    head.setContentsMargins(12, 10, 12, 10)
+    title = QLabel("SALOME Agent — MCP server")
+    big = title.font()
+    big.setPointSizeF(big.pointSizeF() * 1.35)
+    big.setBold(True)
+    title.setFont(big)
+    head.addWidget(title)
     status = QLabel()
     status.setTextFormat(Qt.RichText)
-    lay.addWidget(status)
+    status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    head.addWidget(status)
+    lay.addWidget(header)
+
     intro = QLabel(
         "SALOME is served to AI clients over the Model Context Protocol: the client holds "
         "the conversation and builds in this study with the GEOM, SHAPER and SMESH tools, and "
-        "searches the SALOME documentation. Register the server once in your client, in a "
-        "terminal (the address and token are kept for the next sessions):")
+        "searches the SALOME documentation.")
     intro.setWordWrap(True)
     lay.addWidget(intro)
+
+    # the clients' commands
+    box = QGroupBox("Register the server in your client")
+    blay = QVBoxLayout(box)
+    hint = QLabel("Run the command once in a terminal; the address and token are kept "
+                  "for the next sessions.")
+    hint.setWordWrap(True)
+    hint.setStyleSheet("color: gray;")
+    blay.addWidget(hint)
     grid = QGridLayout()
+    grid.setHorizontalSpacing(8)
+    grid.setVerticalSpacing(6)
+    grid.setColumnStretch(1, 1)
     mono = QFont("Monospace")
     mono.setStyleHint(QFont.TypeWriter)
+    copy_icon = QIcon.fromTheme("edit-copy")
     for row, (name, line) in enumerate(client_commands(info["port"], info["token"]).items()):
-        grid.addWidget(QLabel(f"<b>{name}</b>"), row, 0)
+        # a long parenthesis (the examples of other clients) goes on a line of its own
+        main, _, extra = name.partition(" (") if ", " in name else (name, "", "")
+        text = f"<b>{main}</b>" + (f"<br><span style='color:gray'>({extra}</span>"
+                                   if extra else "")
+        label = QLabel(text)
+        label.setTextFormat(Qt.RichText)
+        grid.addWidget(label, row, 0, Qt.AlignVCenter)
         edit = QLineEdit(line)
         edit.setReadOnly(True)
         edit.setFont(mono)
         edit.setCursorPosition(0)
+        edit.setToolTip(line)
         edit.setObjectName(f"cmd-{row}")
+        edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         grid.addWidget(edit, row, 1)
-        copy = QPushButton("Copy")
-        copy.clicked.connect(lambda _=False, t=line: QGuiApplication.clipboard().setText(t))
+        copy = QPushButton(copy_icon, "Copy")
+        copy.setToolTip(f"Copy the {main} command to the clipboard")
+
+        def copied(_=False, t=line, b=copy):
+            QGuiApplication.clipboard().setText(t)
+            b.setText("Copied ✓")
+            QTimer.singleShot(1500, lambda: _reset_label(b, "Copy"))
+
+        copy.clicked.connect(copied)
         grid.addWidget(copy, row, 2)
-    lay.addLayout(grid)
+    blay.addLayout(grid)
+    lay.addWidget(box)
+
+    usage = QGroupBox("Using it")
+    ulay = QVBoxLayout(usage)
     notes = QLabel(
         "Then ask the client for something in SALOME, e.g. <i>make a 10 mm cube with a 2 mm "
-        "fillet</i>. The server runs until SALOME closes or you stop it; closing this window "
-        "leaves it running. The agent server serves one client at a time: keep the chat window "
-        "out of an Agentic assistant conversation while a client builds.<br>Claude Desktop "
-        "starts its own server instead: <tt>salome-agent-gui.sh --mcp --desktop-config</tt> "
-        f"prints its entry. Log: <tt>{info.get('log', '')}</tt>")
+        "fillet</i>.<ul style='margin-left:-20px'>"
+        "<li>The server runs until SALOME closes or you stop it; closing or minimizing this "
+        "window leaves it running.</li>"
+        "<li>The agent server serves one client at a time: keep the chat window out of an "
+        "Agentic assistant conversation while a client builds.</li>"
+        "<li>Claude Desktop can also start its own server: "
+        "<tt style='white-space:pre'>salome-agent-gui.sh --mcp --desktop-config</tt> prints its entry.</li></ul>"
+        f"Log: <tt>{info.get('log', '')}</tt>")
     notes.setWordWrap(True)
+    notes.setTextFormat(Qt.RichText)
     notes.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    lay.addWidget(notes)
-    buttons = QDialogButtonBox(QDialogButtonBox.Close)
+    ulay.addWidget(notes)
+    lay.addWidget(usage)
+
+    buttons = QDialogButtonBox()
     stop = buttons.addButton("Stop server", QDialogButtonBox.DestructiveRole)
-    buttons.rejected.connect(dlg.close)
+    stop.setIcon(dlg.style().standardIcon(QStyle.SP_MediaStop))
+    close = buttons.addButton(QDialogButtonBox.Close)
+    close.clicked.connect(dlg.close)
     lay.addWidget(buttons)
 
     ticks = {"n": 0}
 
+    def show(state: str, text: str):
+        dot = _STATUS_COLORS[state]
+        status.setText(f"<span style='color:{dot}; font-size:large'>●</span>&nbsp; {text}")
+
     def refresh():
         ticks["n"] += 1
         if port_fn(info["port"]) and alive_fn():
-            status.setText(f"<b>MCP server running</b>, waiting for clients on <tt>{url}</tt>")
+            show("running", f"<b>MCP server running</b>, waiting for clients on <tt>{url}</tt>")
             stop.setEnabled(True)
         elif alive_fn() and ticks["n"] < 60:
-            status.setText("<b>MCP server starting…</b>")
+            show("starting", "<b>MCP server starting…</b>")
             stop.setEnabled(True)
         else:
-            status.setText("<b>MCP server not running.</b> Choose Tools &gt; Plugins &gt; AI "
-                           f"tools &gt; MCP server to start it; see the log if it stopped.")
+            show("stopped", "<b>MCP server not running.</b> Choose Tools &gt; Plugins &gt; AI "
+                            "tools &gt; MCP server to start it; see the log if it stopped.")
             stop.setEnabled(False)
 
     def stop_clicked():
@@ -352,9 +458,21 @@ def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_f
     timer.start()
     refresh()
     dlg.timer = timer
+    dlg.adjustSize()
+    if parent is not None:          # centred on SALOME, as a dialog would be
+        frame = dlg.frameGeometry()
+        frame.moveCenter(parent.frameGeometry().center())
+        dlg.move(frame.topLeft())
     dlg.show()
     _DIALOG = dlg
     return dlg
+
+
+def _reset_label(button, text: str) -> None:
+    try:
+        button.setText(text)
+    except RuntimeError:            # the window was closed meanwhile
+        pass
 
 
 # ---- the menu entries (salome_plugins.py) -------------------------------------

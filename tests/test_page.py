@@ -199,6 +199,24 @@ def test_replay_rebuilds_the_transcript(qtbot, page):
     assert run_js(qtbot, view, "document.querySelector('.msg-user').textContent") == "a"
 
 
+def test_a_job_log_card_shows_the_build_messages(qtbot, page):
+    view, fake = page
+    fake.emit("addJob", {"id": 0, "job": "index", "title": "Building the documentation index",
+                         "state": "running", "lines": []})
+    fake.emit("jobLine", {"id": 0, "line": "Processing GEOM"})
+    fake.emit("jobLine", {"id": 0, "line": EVIL})
+    wait_js(qtbot, view, "document.querySelector('.job-lines').textContent.includes('onerror')")
+    assert run_js(qtbot, view, "document.querySelector('.job-lines').textContent") == \
+        "Processing GEOM\n" + EVIL
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+    fake.emit("jobState", {"id": 0, "state": "failed"})
+    wait_js(qtbot, view, "document.querySelector('.job-log').classList.contains('failed')")
+    fake.emit("replay", {"items": [{"type": "job", "id": 0, "job": "index", "title": "T",
+                                    "state": "ok", "lines": ["a", "b"]}]})
+    wait_js(qtbot, view, "document.querySelector('.job-title').textContent === 'T'")
+    assert run_js(qtbot, view, "document.querySelector('.job-lines').textContent") == "a\nb"
+
+
 def test_offline_status_shows_the_banner(qtbot, page):
     view, fake = page
     fake.emit("setStatus", STATUS_OFF)
@@ -721,6 +739,43 @@ def test_doc_answer_renders_markdown_and_sources(qtbot, page):
     assert run_js(qtbot, view, "document.querySelectorAll('.sources li').length") == 3
     assert run_js(qtbot, view, "document.querySelector('.answer-foot').textContent") == \
         "9 agent messages18k in / 410 out"
+
+
+def test_python_blocks_of_a_doc_answer_run_in_salome_after_a_confirmation(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    rag = dict(DOC_VM["rag"], agentic=True,
+               answer="```python\nimport salome\nx = 1\n```\n\n```bash\nls\n```\n\n"
+                      "```\nfrom salome.geom import geomBuilder\n```\n")
+    fake.emit("renderTurn", dict(DOC_VM, rag=rag))
+    wait_js(qtbot, view, "document.querySelector('.answer') !== null")
+    # the bash block gets no bar; the unlabelled one that imports does
+    assert run_js(qtbot, view, "[...document.querySelectorAll('.code-run')].map(b => b.dataset.key)"
+                  ".join()") == "0:0,0:2"
+    run_js(qtbot, view, "document.querySelector('.code-run .btn').click(); true")
+    wait_js(qtbot, view, "document.querySelector('.code-run-ask') !== null")
+    assert not [c for c in fake.calls if c[0] == "runCode"]          # nothing runs before the confirm
+    run_js(qtbot, view, "document.querySelector('.code-run [data-action=run-confirm]').click(); true")
+    qtbot.waitUntil(lambda: any(c[0] == "runCode" for c in fake.calls), timeout=3000)
+    assert [c for c in fake.calls if c[0] == "runCode"] == [("runCode", "0:0", "import salome\nx = 1")]
+    wait_js(qtbot, view, "document.querySelector('.code-run .btn').disabled")
+    fake.emit("codeRun", {"key": "0:0", "state": "failed", "text": f"NameError: {EVIL}"})
+    wait_js(qtbot, view, "document.querySelector('.code-run-out.failed') !== null")
+    assert run_js(qtbot, view, "document.querySelector('.code-run-out').textContent") == \
+        f"NameError: {EVIL}"
+    assert run_js(qtbot, view, "window.pwned === undefined") is True
+    # a re-render of the answer keeps what the run said
+    fake.emit("renderTurn", dict(DOC_VM, rag=rag))
+    wait_js(qtbot, view, "document.querySelector('.code-run-out.failed') !== null")
+
+
+def test_classical_rag_answers_have_no_run_button(qtbot, page):
+    view, fake = page
+    doc_page(qtbot, view, fake)
+    rag = dict(DOC_VM["rag"], agentic=False, answer="```python\nimport salome\n```\n")
+    fake.emit("renderTurn", dict(DOC_VM, rag=rag))
+    wait_js(qtbot, view, "document.querySelector('.answer pre') !== null")
+    assert run_js(qtbot, view, "document.querySelectorAll('.code-run').length") == 0
 
 
 def test_doc_answer_text_is_never_html(qtbot, page):

@@ -71,6 +71,10 @@ class FakeBridge(QObject):
     def buildIndex(self):
         self.calls.append(("buildIndex",))
 
+    @pyqtSlot(str, str)
+    def runCode(self, key, code):
+        self.calls.append(("runCode", key, code))
+
 
 def _stage(index, module, intent, **kw):
     s = {"index": index, "module": module, "icon": None, "intent": intent, "status": "pending",
@@ -313,6 +317,16 @@ DOC_VM = _vm(0, status="ok", elapsed_s=21.4, rag=_doc_rag())
 DOC_BASE = [("setSettings", DOC_SETTINGS), ("setStatus", DOC_STATUS)]
 STATES.update({
     "doc-empty": DOC_BASE + [("setBusy", DOC_IDLE)],
+    "doc-index-build": DOC_BASE + [
+        ("setBusy", DOC_IDLE),
+        ("addNote", {"text": "Building the documentation index; this can take a while."}),
+        ("addJob", {"id": 0, "job": "index", "title": "Building the documentation index",
+                    "state": "running", "lines": []})] + [
+        ("jobLine", {"id": 0, "line": line}) for line in (
+            "=" * 70, "Processing GEOM - Geometry module", "=" * 70,
+            "  Processing user docs...", "    Found 412 files",
+            "    Processed 100/412 files (1840 chunks so far)",
+            "    Processed 200/412 files (3712 chunks so far)")],
     "doc-running": DOC_BASE + [("setBusy", DOC_BUSY), ("addUser", {"text": DOC_QUESTION}),
                                ("renderTurn", "doc-running")],
     "doc-answer": DOC_BASE + [("setBusy", dict(DOC_IDLE, open=True)),

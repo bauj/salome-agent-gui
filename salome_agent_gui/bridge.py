@@ -1,6 +1,7 @@
 # Copyright (C) 2026  salome-agent authors
 # LGPL 2.1 or later
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -17,6 +18,40 @@ IMAGE_ONLY_REQUEST = "Build what the attached image(s) show."
 NO_SERVER = ("No agent server. Start it from Tools > Plugins > AI tools > SALOME agent in "
              "the SALOME window, then press Reconnect in the settings.")
 NO_IMAGES = "Images are only read in the Agentic assistant mode; message not sent."
+# how long SALOME may run the code of a documentation answer; past it the agent
+# server is poisoned and SALOME must be restarted, so the limit is generous
+CODE_RUN_TIMEOUT = 600
+NO_CODE_RUN = ("This SALOME's agent server does not run code. Open the window from "
+               "Tools > Plugins > AI tools > Documentation (RAG) in SALOME, which allows it.")
+CODE_RUN_BUSY = "Another code block is running in SALOME; wait for it to finish."
+# the lines a background job's log card keeps (the index build prints one per file batch)
+JOB_LOG_LINES = 500
+JOB_TITLES = {"index": "Building the documentation index",
+              "models": "Downloading the local models"}
+
+
+def run_in_salome(code: str) -> dict:
+    """Run `code` in SALOME through the agent server's `run` command.
+    {"ok": bool, "text": what to show under the code block}."""
+    from salome_agent import server_conn
+
+    try:
+        client = server_conn.connect("")
+    except server_conn.ServerUnavailable as e:
+        return {"ok": False, "text": str(e)}
+    try:
+        resp = client.run(code, CODE_RUN_TIMEOUT)
+    except Exception as e:                     # noqa: BLE001  the socket, a poisoned server
+        return {"ok": False, "text": f"The run did not finish: {e}"}
+    finally:
+        client.close()
+    if resp.get("ok"):
+        return {"ok": True, "text": "Ran in SALOME."}
+    error = str(resp.get("error") or "")
+    if "--allow-run" in error:
+        return {"ok": False, "text": NO_CODE_RUN}
+    text = resp.get("traceback") or resp.get("exception") or error or "The code failed in SALOME."
+    return {"ok": False, "text": str(text).rstrip()}
 
 
 def parse_images(text: str) -> list[str]:
@@ -33,11 +68,13 @@ class Bridge(QObject):
 
     push = pyqtSignal(str, str)
     close_ready = pyqtSignal()
+    _code_done = pyqtSignal(str, object)       # key, run_in_salome's answer (from its thread)
 
     def __init__(self, config_path, *, open_fn=None, probe_fn=None, edit_plan=None,
                  edit_config=None, pick_config=None, open_file=None, icon_for=None, system_dark=None,
                  clock=time.time, dialog_parent=None, rag_open_fn=None, open_url=None,
-                 build_index_fn=None, download_fn=None, family=None, parent=None):
+                 build_index_fn=None, download_fn=None, code_run_fn=None, open_doc=None,
+                 family=None, parent=None):
         super().__init__(parent)
         if probe_fn is None:
             from agent_server import handshake
@@ -52,10 +89,21 @@ class Bridge(QObject):
         self._pick_config = pick_config or (lambda parent, current: None)
         self._open_file = open_file or (lambda path: None)
         self._open_url = open_url or (lambda url: None)
+        # the documentation links (cited pages, web links in the answers): the
+        # window's own browser, in a new tab; without one, open_file / open_url
+        self._open_doc = open_doc
         self._rag_open_fn = rag_open_fn
         self._build_index_fn = build_index_fn
         self._download_fn = download_fn
+        self._code_run_fn = code_run_fn or run_in_salome
+        # the documentation answers' code blocks run in SALOME: key -> {"state", "text"}
+        self._code_runs: dict[str, dict] = {}
+        self._code_key: str | None = None      # the one running now
+        self._code_done.connect(self._on_code_done)
         self._job = ""                         # what self.indexer runs: "index" or "models"
+        # each job's log card in the transcript: id -> {"id", "job", "title", "state", "lines"}
+        self._job_logs: dict[int, dict] = {}
+        self._job_log: int | None = None       # the running job's card
         self._models_line = ""
         self._icon_for = icon_for or module_icons.icon_for
         self._system_dark = system_dark or (lambda: False)
@@ -190,9 +238,13 @@ class Bridge(QObject):
                 items.append({"type": "turn", "vm": self._vm(value)})
             elif kind == "user":
                 items.append({"type": "user", **value})
+            elif kind == "job":
+                items.append({"type": "job", **self._job_logs[value]})
             else:
                 items.append({"type": kind, "text": value})
         self._emit("replay", {"items": items})
+        for key, run in self._code_runs.items():
+            self._emit("codeRun", {"key": key, **run})
 
     def page_lost(self) -> None:
         self.page_ready = False
@@ -574,6 +626,36 @@ class Bridge(QObject):
         if self.close_pending and self.indexer is None:
             self.close_ready.emit()
 
+    # ---- code of the documentation answers, run in SALOME ---------------
+    @pyqtSlot(str, str)
+    def runCode(self, key: str, code: str) -> None:
+        """Run a documentation answer's code block (`key` names it on the page)
+        in SALOME, on a thread: the agent server answers when SALOME is done."""
+        if not key or not code.strip():
+            return
+        if self._code_key is not None:
+            self._emit("codeRun", {"key": key, "state": "failed", "text": CODE_RUN_BUSY})
+            return
+        self._code_key = key
+        self._code_runs[key] = {"state": "running", "text": ""}
+        self._emit("codeRun", {"key": key, **self._code_runs[key]})
+
+        def work():
+            try:
+                result = self._code_run_fn(code)
+            except Exception as e:             # noqa: BLE001
+                result = {"ok": False, "text": f"{type(e).__name__}: {e}"}
+            self._code_done.emit(key, result)
+
+        threading.Thread(target=work, name="salome-code-run", daemon=True).start()
+
+    def _on_code_done(self, key: str, result: dict) -> None:
+        if key == self._code_key:
+            self._code_key = None
+        self._code_runs[key] = {"state": "ok" if result.get("ok") else "failed",
+                                "text": str(result.get("text") or "")}
+        self._emit("codeRun", {"key": key, **self._code_runs[key]})
+
     # ---- files and closing ----------------------------------------------
     @pyqtSlot(str)
     def openFile(self, path: str) -> None:
@@ -583,11 +665,17 @@ class Bridge(QObject):
     @pyqtSlot(str)
     def openLink(self, target: str) -> None:
         """A page an answer cites (web URL or local file), or a web link in an
-        answer's text; nothing else."""
-        if target in self._links and not target.startswith(("http://", "https://")):
-            self._open_file(target)
-        elif target.startswith(("http://", "https://")):
+        answer's text; nothing else. They open in the window's documentation
+        browser, in a new tab, when it has one."""
+        web = target.startswith(("http://", "https://"))
+        if not web and target not in self._links:
+            return
+        if self._open_doc is not None:
+            self._open_doc(target)
+        elif web:
             self._open_url(target)
+        else:
+            self._open_file(target)
 
     # ---- documentation index --------------------------------------------
     @pyqtSlot()
@@ -604,9 +692,9 @@ class Bridge(QObject):
             self._note("A stopped documentation question is still being answered: "
                        "rebuild the index once it is done.")
             return
+        self._note("Building the documentation index; this can take a while.")
         self._start_job("index", IndexWorker(self.config_path, build_fn=self._build_index_fn,
                                              parent=self))
-        self._note("Building the documentation index; this can take a while.")
 
     def _start_job(self, job: str, worker) -> None:
         worker.line.connect(self._on_index_line)
@@ -614,6 +702,12 @@ class Bridge(QObject):
         worker.finished.connect(lambda w=worker: self._on_indexer_finished(w))
         self.indexer = worker
         self._job = job
+        log_id = len(self._job_logs)
+        self._job_logs[log_id] = {"id": log_id, "job": job, "title": JOB_TITLES[job],
+                                  "state": "running", "lines": []}
+        self._job_log = log_id
+        self._items.append(("job", log_id))
+        self._emit("addJob", self._job_logs[log_id])
         self._set_job_line("starting…")
         worker.start()
         self._emit("setSettings", self._settings())
@@ -650,8 +744,8 @@ class Bridge(QObject):
         def run(_path, on_line, cancel):
             return download(items, on_line=on_line, cancel=cancel)
 
-        self._start_job("models", IndexWorker(self.config_path, build_fn=run, parent=self))
         self._note("Downloading " + ", ".join(m for _, _, m in items) + " into the Hugging Face cache.")
+        self._start_job("models", IndexWorker(self.config_path, build_fn=run, parent=self))
 
     def _set_job_line(self, text: str) -> None:
         if self._job == "models":
@@ -662,8 +756,21 @@ class Bridge(QObject):
     def _on_index_line(self, text: str) -> None:
         self._set_job_line(text)
         self._emit("setIndex", {"building": True, "job": self._job, "line": text})
+        log = self._job_logs.get(self._job_log)
+        if log is not None:
+            log["lines"].append(text)
+            del log["lines"][:-JOB_LOG_LINES]
+            self._emit("jobLine", {"id": log["id"], "line": text})
+
+    def _end_job_log(self, ok: bool) -> None:
+        log = self._job_logs.get(self._job_log)
+        if log is not None:
+            log["state"] = "ok" if ok else "failed"
+            self._emit("jobState", {"id": log["id"], "state": log["state"]})
+        self._job_log = None
 
     def _on_index_done(self, code: int, tail: str) -> None:
+        self._end_job_log(code == 0)
         if self._job == "models":
             self._models_line = "" if code == 0 else f"download failed (exit {code})"
             self._note("Models downloaded." if code == 0
@@ -680,6 +787,8 @@ class Bridge(QObject):
         if worker is not self.indexer:
             return
         worker.wait()
+        if self._job_log is not None:          # ended without a result
+            self._end_job_log(False)
         self.indexer = None
         self._job = ""
         self._emit("setSettings", self._settings())
