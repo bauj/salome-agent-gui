@@ -273,8 +273,8 @@ def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_f
     lay.addWidget(status)
     intro = QLabel(
         "SALOME is served to AI clients over the Model Context Protocol: the client holds "
-        "the conversation and builds in this study with the GEOM, SHAPER and SMESH tools, and "
-        "searches the SALOME documentation. Register the server once in your client, in a "
+        "the conversation and builds in this study with the GEOM, SHAPER and SMESH tools. "
+        "Register the server once in your client, in a "
         "terminal (the address and token are kept for the next sessions):")
     intro.setWordWrap(True)
     lay.addWidget(intro)
