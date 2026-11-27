@@ -142,7 +142,7 @@ class SalomeSession:
                 run_dir.rmdir()                  # only if the failed connect left it empty
             raise
         self.run_id = run_id
-        self.calls, self.deleted = [], set()
+        self.calls, self.deleted, self._saved = [], set(), set()
 
     def _call(self, fn):
         """fn(client) with a session open; a dropped one is reported, never
@@ -214,8 +214,12 @@ class SalomeSession:
         result = self._call(lambda c: c.call_tool(name, args, module=module))
         if result.get("ok") and result.get("records"):
             with self._lock:
+                records = list(result["records"])
                 self.calls.append({"module": module, "tool": name, "args": dict(args),
-                                   "records": list(result["records"])})
+                                   "records": records})
+                for rec in records:
+                    if isinstance(rec, dict):
+                        self.deleted.difference_update(rec.get("publish") or [])
         return result
 
     def list_study(self) -> dict:
