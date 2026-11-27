@@ -57,7 +57,7 @@ class FakeClient:
         self.closed = True
 
 
-def make(tmp_path, client=None, docs=None):
+def make(tmp_path, client=None):
     opened = []
 
     def connect(run_id, run_dir):
@@ -65,7 +65,7 @@ def make(tmp_path, client=None, docs=None):
         return client
 
     session = ms.SalomeSession(connect=connect, runs_dir=tmp_path / "runs")
-    server = ms.build_server(session, docs or ms.DocSearch(loader=lambda path: FAKE_DOCS))
+    server = ms.build_server(session)
     return server, session, opened
 
 
@@ -86,17 +86,6 @@ def text(result):
     return "\n".join(c.text for c in result.content if getattr(c, "type", "") == "text")
 
 
-FAKE_DOCS = {
-    "search": lambda q, n: [{"filename": "box.html", "title": "Box", "module": "GEOM",
-                             "doc_category": "user", "section_text": f"about {q}",
-                             "url": "https://docs.salome-platform.org/latest/gui/GEOM/box.html"}],
-    "read": lambda path, cat, max_chars: f"page {path} ({cat}, {max_chars})",
-    "pages": {"box.html": {"filename": "box.html", "filepath": "/doc/box.html", "title": "Box",
-                           "doc_category": "user"}},
-    "max_chars": 8000,
-}
-
-
 # ---- tools and the guide ------------------------------------------------------
 def test_the_tool_list_is_small_and_marks_what_changes_the_study(tmp_path):
     server, _, _ = make(tmp_path)
@@ -104,8 +93,8 @@ def test_the_tool_list_is_small_and_marks_what_changes_the_study(tmp_path):
     assert set(tools) == {
         "salome_status", "list_cad_tools", "describe_cad_tool", "call_cad_tool", "calc",
         "view_salome", "list_study", "show_objects", "hide_objects", "delete_objects",
-        "save_salome_script", "release_salome", "search_salome_docs", "read_salome_doc_page"}
-    assert tools["search_salome_docs"].annotations.read_only_hint is True
+        "save_salome_script", "release_salome"}
+    assert tools["list_study"].annotations.read_only_hint is True
     assert tools["delete_objects"].annotations.destructive_hint is True
     assert tools["call_cad_tool"].annotations.read_only_hint is False
     assert "SHAPER for CAD" in server.instructions
@@ -173,7 +162,7 @@ def test_no_agent_server_says_how_to_start_it(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server_conn, "connect", unavailable)
     session = ms.SalomeSession(runs_dir=tmp_path)
-    server = ms.build_server(session, ms.DocSearch(loader=lambda p: FAKE_DOCS))
+    server = ms.build_server(session)
     r = call(server, "list_study")
     assert r.is_error and "Tools > Plugins > AI tools > MCP server" in text(r)
     call(server, "list_study")
@@ -187,8 +176,7 @@ def test_a_busy_server_says_who_holds_it_not_how_to_start_it(tmp_path, monkeypat
         raise server_conn.ServerUnavailable("another agent run is in progress. Start it ...")
 
     monkeypatch.setattr(server_conn, "connect", busy)
-    server = ms.build_server(ms.SalomeSession(runs_dir=tmp_path),
-                             ms.DocSearch(loader=lambda p: FAKE_DOCS))
+    server = ms.build_server(ms.SalomeSession(runs_dir=tmp_path))
     r = call(server, "view_salome")
     assert r.is_error and "busy" in text(r) and "New conversation" in text(r)
     assert "Start it" not in text(r)
@@ -217,7 +205,7 @@ def test_a_session_left_idle_is_released_and_the_next_call_says_so(tmp_path):
     session = ms.SalomeSession(connect=connect, runs_dir=tmp_path, idle_release_s=600,
                                clock=lambda: now[0])
     pool = ms.SessionPool(single=session, reap_every=0)
-    server = ms.build_server(pool, ms.DocSearch(loader=lambda p: FAKE_DOCS))
+    server = ms.build_server(pool)
     call(server, "list_study")
     now[0] = 599
     pool.reap()
@@ -311,46 +299,18 @@ def test_calc_runs_the_engine_calculator(tmp_path):
     assert text(call(server, "calc", {"code": "round(hypot(3, 4), 3)"})).strip().endswith("5.0")
 
 
-# ---- documentation -------------------------------------------------------------
-def test_doc_search_returns_sections_with_filename_and_online_page(tmp_path):
-    server, _, _ = make(tmp_path)
-    out = text(call(server, "search_salome_docs", {"query": "box", "top_n": 99}))
-    assert out.startswith("[1] Box | GEOM/user") and "filename: box.html" in out
-    assert "online: https://docs.salome-platform.org/latest/gui/GEOM/box.html" in out
-    assert "about box" in out
-    page = text(call(server, "read_salome_doc_page", {"filename": "box.html"}))
-    assert "page /doc/box.html (user, 8000)" in page
-    r = call(server, "read_salome_doc_page", {"filename": "other.html"})
-    assert r.is_error and "search_salome_docs returned" in text(r)
-
-
-def test_doc_search_without_rag_section_or_models_says_what_to_do(tmp_path, hf_cache):
-    cfg = tmp_path / "c.json"
-    cfg.write_text(json.dumps({"llm": {}}))
-    r = call(ms.build_server(ms.SalomeSession(runs_dir=tmp_path), ms.DocSearch(cfg)),
-             "search_salome_docs", {"query": "box"})
-    assert r.is_error and "no rag section" in text(r)
-    example = json.loads((ms.Path(ms.__file__).parent / "config.example.json").read_text())
-    cfg.write_text(json.dumps(example))
-    r = call(ms.build_server(ms.SalomeSession(runs_dir=tmp_path), ms.DocSearch(cfg)),
-             "search_salome_docs", {"query": "box"})
-    assert r.is_error and "not installed: all-MiniLM-L6-v2" in text(r)
-    assert "Settings > Local models" in text(r)
-
-
 # ---- over stdio, as Claude Desktop runs it ----------------------------------
 SERVER_SCRIPT = textwrap.dedent("""
     import os, sys
     from salome_agent_gui import mcp_server as ms
 
-    def loader(path):
-        print("DEBUG : load vector store ...")          # what raglib does
+    def guide(module):
+        print("DEBUG : loading the guide ...")          # a stray print
         os.write(1, b"raw bytes on fd 1\\n")              # and C code might
-        return {"search": lambda q, n: [{"filename": "a.html", "title": "A", "module": "SMESH",
-                                         "doc_category": "dev", "section_text": "text"}],
-                "read": None, "pages": {}, "max_chars": 1}
+        return f"GUIDE {module}"
 
-    ms.serve_stdio(ms.build_server(docs=ms.DocSearch(loader=loader)))
+    ms.guide = guide
+    ms.serve_stdio(ms.build_server())
 """)
 
 
@@ -368,15 +328,15 @@ def test_over_stdio_stray_output_never_reaches_the_protocol(tmp_path):
                 async with ClientSession(read, write) as client:
                     init = await client.initialize()
                     tools = await client.list_tools()
-                    found = await client.call_tool("search_salome_docs", {"query": "mesh"})
+                    found = await client.call_tool("list_cad_tools", {"module": "geom"})
                     return init, tools, found
 
     init, tools, found = asyncio.run(run())
     assert init.server_info.name == "salome-agent" and "SALOME tools" in init.instructions
-    assert len(tools.tools) == 14
-    assert not found.is_error and found.content[0].text.startswith("[1] A | SMESH/dev")
+    assert len(tools.tools) == 12
+    assert not found.is_error and found.content[0].text == "GUIDE geom"
     err = (tmp_path / "stderr.txt").read_text()
-    assert "DEBUG : load vector store" in err and "raw bytes on fd 1" in err
+    assert "DEBUG : loading the guide" in err and "raw bytes on fd 1" in err
 
 
 # ---- Claude Desktop's config entry -----------------------------------------------
@@ -387,8 +347,8 @@ def test_desktop_entry_goes_through_wsl_and_prefers_the_launcher(tmp_path):
     env = {"WSL_DISTRO_NAME": "Ubuntu-24.04", "SALOME_AGENT_GUI_ROOT_DIR": str(tmp_path)}
     assert ms.desktop_entry(environ=env) == {
         "command": "wsl.exe", "args": ["-d", "Ubuntu-24.04", "-e", str(launcher), "--mcp"]}
-    entry = ms.desktop_entry(config="/c/x.json", environ={}, argv0="/venv/bin/salome-agent-mcp")
-    assert entry == {"command": "/venv/bin/salome-agent-mcp", "args": ["--config", "/c/x.json"]}
+    entry = ms.desktop_entry(environ={}, argv0="/venv/bin/salome-agent-mcp")
+    assert entry == {"command": "/venv/bin/salome-agent-mcp", "args": []}
 
 
 def test_desktop_config_prints_a_mergeable_json(capsys):
@@ -397,52 +357,13 @@ def test_desktop_config_prints_a_mergeable_json(capsys):
     assert list(printed["mcpServers"]) == ["salome-agent"]
 
 
-def test_doc_search_loads_the_index_again_once_it_is_rebuilt(tmp_path):
-    import os
-
-    index = tmp_path / "page_index.json"
-    index.write_text("[]")
-    loads = []
-
-    def loader(path):
-        loads.append(path)
-        return dict(FAKE_DOCS, watch=[str(index)])
-
-    docs = ms.DocSearch(tmp_path / "c.json", loader=loader)
-    docs.search("mesh")
-    docs.search("mesh")
-    assert len(loads) == 1
-    st = index.stat()
-    os.utime(index, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
-    docs.search("mesh")
-    assert len(loads) == 2
-
-
-def test_online_links_come_from_the_module_citation_and_the_page_path(tmp_path):
-    roots = ms.online_roots({"modules": {
-        "GEOM": {"user_path": str(tmp_path / "gui/GEOM"), "dev_path": str(tmp_path / "tui/GEOM"),
-                 "url_for_sources_citation": {"user": "https://d/gui/GEOM/", "dev": "https://d/tui/GEOM"}},
-        "MINE": {"user_path": "/x", "url_for_sources_citation": "https://mine"}, "_c": "skip"}})
-    assert roots[("MINE", "user")] == ("/x", "https://mine")
-    docs = ms.DocSearch(loader=lambda p: dict(FAKE_DOCS, online=roots))
-    docs._get()
-    page = {"module": "GEOM", "doc_category": "user", "filepath": str(tmp_path / "gui/GEOM/sub/box.html")}
-    assert docs._online(page) == "https://d/gui/GEOM/sub/box.html"
-    assert docs._online(dict(page, filepath="/elsewhere/box.html")) == ""
-    assert docs._online(dict(page, url="https://given")) == "https://given"
-
-
 # ---- over HTTP, as Tools > Plugins > AI tools > MCP server runs it ---------------
 HTTP_SCRIPT = textwrap.dedent("""
     import sys
     from salome_agent_gui import mcp_server as ms
 
-    def loader(path):
-        return {"search": lambda q, n: [{"filename": "a.html", "title": "A", "module": "SMESH",
-                                         "doc_category": "dev", "section_text": "text"}],
-                "read": None, "pages": {}, "max_chars": 1}
-
-    ms.serve_http(ms.build_server(docs=ms.DocSearch(loader=loader)), int(sys.argv[1]), sys.argv[2])
+    ms.guide = lambda module: f"GUIDE {module}"
+    ms.serve_http(ms.build_server(), int(sys.argv[1]), sys.argv[2])
 """)
 
 
@@ -483,12 +404,12 @@ def test_over_http_the_server_waits_for_clients_with_the_token(tmp_path):
                 async with streamable_http_client(url, http_client=http) as streams:
                     async with ClientSession(*streams[:2]) as client:
                         init = await client.initialize()
-                        found = await client.call_tool("search_salome_docs", {"query": "mesh"})
+                        found = await client.call_tool("list_cad_tools", {"module": "smesh"})
                         return init, found
 
         init, found = asyncio.run(run({"Authorization": f"Bearer {token}"}))
         assert init.server_info.name == "salome-agent"
-        assert not found.is_error and found.content[0].text.startswith("[1] A | SMESH/dev")
+        assert not found.is_error and found.content[0].text == "GUIDE smesh"
         bad = httpx2.post(url, json={}, headers={"Authorization": "Bearer wrong"})
         assert bad.status_code == 401
     finally:
@@ -519,9 +440,7 @@ HTTP_SESSIONS_SCRIPT = textwrap.dedent("""
         return ms.SalomeSession(connect=lambda run_id, run_dir: Client(run_id),
                                 runs_dir=sys.argv[3])
 
-    ms.serve_http(ms.build_server(ms.SessionPool(factory=factory),
-                                  ms.DocSearch(loader=lambda p: None)),
-                  int(sys.argv[1]), sys.argv[2])
+    ms.serve_http(ms.build_server(ms.SessionPool(factory=factory)), int(sys.argv[1]), sys.argv[2])
 """)
 
 
@@ -602,13 +521,11 @@ def test_the_token_file_is_made_private_even_if_it_was_not(tmp_path):
     assert p.stat().st_mode & 0o777 == 0o600
 
 
-def test_check_reports_a_broken_catalogue_and_still_shows_the_docs(tmp_path, monkeypatch, capsys):
+def test_check_reports_a_broken_catalogue(monkeypatch, capsys):
     def broken(module):
         raise ImportError(f"no executor.{module}")
 
     monkeypatch.setattr(ms, "_catalogue", broken)
-    monkeypatch.setattr(ms.DocSearch, "_get", lambda self: FAKE_DOCS)
-    assert ms.check(str(tmp_path / "c.json")) == 0
+    assert ms.check() == 0
     err = capsys.readouterr().err
     assert "geom: tools not available (ImportError: no executor.geom)" in err
-    assert "documentation search: ready" in err

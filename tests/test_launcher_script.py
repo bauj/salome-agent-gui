@@ -11,8 +11,7 @@ SCRIPT = Path(__file__).resolve().parent.parent / "salome-agent-gui.sh"
 RECORD = """#!/bin/bash
 python3 - "$0" "$@" <<'EOF'
 import json, os, sys
-keys = ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "QT_PLUGIN_PATH",
-        "TOKENIZERS_PARALLELISM", "FAKE_VENV")
+keys = ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "QT_PLUGIN_PATH", "FAKE_VENV")
 print(json.dumps({"cmd": os.path.basename(sys.argv[1]), "args": sys.argv[2:],
                   "cwd": os.getcwd(), "env": {k: os.environ.get(k) for k in keys}}))
 EOF
@@ -20,13 +19,13 @@ EOF
 
 
 def fake_prefix(tmp_path):
-    """A venv layout: bin/activate and the two console scripts, which print
+    """A venv layout: bin/activate and the console scripts, which print
     what they were started with."""
     prefix = tmp_path / "prefix"
     (prefix / "bin").mkdir(parents=True, exist_ok=True)
     (prefix / "bin" / "activate").write_text(
         f'export FAKE_VENV=1\nexport PATH="{prefix}/bin:$PATH"\n')
-    for name in ("salome-agent-gui", "salome-agent-rag-index", "salome-agent-mcp"):
+    for name in ("salome-agent-gui", "salome-agent-mcp"):
         p = prefix / "bin" / name
         p.write_text(RECORD)
         p.chmod(0o755)
@@ -44,15 +43,13 @@ def run(tmp_path, *args, env=None):
     return json.loads(out.stdout)
 
 
-def test_window_starts_in_its_venv_away_from_salome_and_without_its_env(tmp_path):
+def test_window_starts_in_its_venv_without_salome_env(tmp_path):
     got = run(tmp_path, "--x", env={"PYTHONPATH": "/salome/py", "PYTHONHOME": "/salome",
                                     "LD_LIBRARY_PATH": "/salome/lib",
                                     "QT_PLUGIN_PATH": "/salome/qt"})
     assert got["cmd"] == "salome-agent-gui" and got["args"] == ["--x"]
-    assert got["cwd"] == str(tmp_path / "home" / ".local" / "share" / "salome-agent" / "rag")
     assert got["env"] == {"PYTHONPATH": None, "PYTHONHOME": None, "LD_LIBRARY_PATH": None,
-                          "QT_PLUGIN_PATH": None, "TOKENIZERS_PARALLELISM": "false",
-                          "FAKE_VENV": "1"}
+                          "QT_PLUGIN_PATH": None, "FAKE_VENV": "1"}
 
 
 def test_script_strips_at_least_what_the_plugin_strips():
@@ -61,26 +58,7 @@ def test_script_strips_at_least_what_the_plugin_strips():
         assert var in text, var
 
 
-def test_data_dir_and_tokenizers_setting_can_be_overridden(tmp_path):
-    got = run(tmp_path, env={"SALOME_AGENT_GUI_DATA_DIR": str(tmp_path / "data"),
-                             "TOKENIZERS_PARALLELISM": "true"})
-    assert got["cwd"] == str(tmp_path / "data")
-    assert got["env"]["TOKENIZERS_PARALLELISM"] == "true"
-
-
-def test_build_index_runs_the_indexer_with_the_config_made_absolute(tmp_path):
-    got = run(tmp_path, "--build-index", "cfg/my.json")
-    assert got["cmd"] == "salome-agent-rag-index"
-    assert got["args"] == [str(tmp_path / "where-salome-started" / "cfg" / "my.json")]
-    assert run(tmp_path, "--build-index", "/abs/c.json")["args"] == ["/abs/c.json"]
-    assert run(tmp_path, "--build-index")["args"] == []
-
-
-def test_a_relative_config_is_made_absolute_for_the_mcp_server(tmp_path):
-    start = tmp_path / "where-salome-started"
-    got = run(tmp_path, "--mcp", "--check", "--config", "my.json")
+def test_mcp_runs_the_mcp_server_with_its_args(tmp_path):
+    got = run(tmp_path, "--mcp", "--http", "--port", "5000")
     assert got["cmd"] == "salome-agent-mcp"
-    assert got["args"] == ["--check", "--config", str(start / "my.json")]
-    got = run(tmp_path, "--mcp", "--desktop-config", "--config=cfg/c.json")
-    assert got["args"] == ["--desktop-config", f"--config={start / 'cfg' / 'c.json'}"]
-    assert run(tmp_path, "--mcp", "--config", "/abs/c.json")["args"] == ["--config", "/abs/c.json"]
+    assert got["args"] == ["--http", "--port", "5000"]

@@ -35,13 +35,12 @@ def test_window_alive_rejects_a_recycled_pid(tmp_path):
 def test_pid_path_lives_in_the_salome_agent_data_dir(monkeypatch):
     from pathlib import Path
 
-    from salome_agent_gui import main_window, mcp_server
+    from salome_agent_gui import mcp_server
 
     monkeypatch.undo()                      # the real paths, not conftest's tmp ones
     data = Path.home() / ".local" / "share" / "salome-agent"
     assert sl.pid_path() == data / "salome-agent-gui.pid"
-    # the window and the MCP server read what the menu writes
-    assert sl.request_path() == main_window.request_path()
+    # the MCP server reads what the menu writes
     assert sl.mcp_settings_path() == mcp_server.HTTP_FILE
 
 
@@ -120,10 +119,7 @@ def test_run_with_live_window_does_not_spawn(monkeypatch, tmp_path):
     monkeypatch.setattr(sl, "pid_path", lambda: p)
     monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
     monkeypatch.setattr(sl, "launch_window", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
-    assert sl.run("ctx") == ""
-    assert json.loads(sl.request_path().read_text()) == {"family": ""}
-    assert sl.run("ctx", "agent") == ""
-    assert json.loads(sl.request_path().read_text()) == {"family": "agent"}
+    assert "already open" in sl.run("ctx")
 
 
 def test_ensure_server_returns_foreign_when_launch_declines():
@@ -161,23 +157,6 @@ def _spy_popen(seen):
         seen.update(args=args, **kw)
         return types.SimpleNamespace(pid=os.getpid())
     return popen
-
-
-def test_run_opens_the_window_on_the_menu_family(monkeypatch, tmp_path):
-    monkeypatch.setattr(sl, "ensure_server", lambda ctx, gui_plugin=None: "started")
-    monkeypatch.setenv("SALOME_AGENT_GUI", "/x/salome-agent-gui.sh")
-    seen = []
-    monkeypatch.setattr(sl, "launch_window", lambda launcher, path, **kw: seen.append(kw["args"]))
-    for family in ("agent", "rag", None, "bogus"):
-        assert sl.run("ctx", family) == ""
-    assert seen == [("--mode", "agent"), ("--mode", "rag"), (), ()]
-
-
-def test_run_rag_needs_no_agent_server(monkeypatch):
-    monkeypatch.setattr(sl, "ensure_server", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
-    monkeypatch.setenv("SALOME_AGENT_GUI", "/x")
-    monkeypatch.setattr(sl, "launch_window", lambda *a, **k: None)
-    assert sl.run("ctx", "rag") == ""
 
 
 def test_mcp_settings_are_created_once_and_private(tmp_path):

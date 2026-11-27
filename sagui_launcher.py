@@ -1,8 +1,8 @@
 # Copyright (C) 2026  salome-agent authors
 # LGPL 2.1 or later
 """SALOME-side half of the SALOME Agent plugin (Tools > Plugins > AI tools):
-start/reuse the in-GUI agent server, spawn the chat window (its own venv) once
-on the family of modes the menu entry chose, or start the MCP server that
+start/reuse the in-GUI agent server, spawn the chat window (its own venv) once,
+or start the MCP server that
 Claude Code, Gemini CLI and other MCP clients connect to. Stdlib only, plus
 PyQt5 for the MCP dialog: this runs in SALOME's Python."""
 import json
@@ -13,8 +13,6 @@ import socket
 import subprocess
 from pathlib import Path
 
-# the menu entries' families of modes (salome_agent_gui.rag_backend.FAMILY_MODES)
-FAMILIES = ("agent", "rag")
 TITLE = "SALOME AI tools"
 MCP_NAME = "salome-agent"
 MCP_DEFAULT_PORT = 47801         # salome_agent_gui.mcp_server.DEFAULT_PORT
@@ -36,11 +34,6 @@ def data_dir() -> Path:
 
 def pid_path() -> Path:
     return data_dir() / "salome-agent-gui.pid"
-
-
-def request_path() -> Path:
-    """Read by the open window (salome_agent_gui.main_window.request_path)."""
-    return data_dir() / "gui-request.json"
 
 
 def mcp_pid_path() -> Path:
@@ -133,11 +126,6 @@ def launch_window(launcher: str, path: Path, environ=None, popen=subprocess.Pope
     return proc.pid
 
 
-def request_family(family: str, path: Path | None = None) -> None:
-    """Ask the open window to show `family` ("" only raises it)."""
-    _write_private(path or request_path(), {"family": family or ""})
-
-
 def _server_problem(context, what: str) -> str:
     """Start or reuse the agent server; a message when it is not this SALOME's."""
     if ensure_server(context) != "foreign":
@@ -153,24 +141,19 @@ def _server_problem(context, what: str) -> str:
             "see the Messages window.")
 
 
-def run(context, family: str | None = None) -> str:
-    """Open the chat window on `family` ("agent": the Agentic assistant, "rag":
-    the documentation modes), or bring the open one to it. A message for the
-    user, or "" when done."""
-    family = family if family in FAMILIES else None
-    if family != "rag":               # the documentation modes need no agent server
-        problem = _server_problem(context, "The chat window")
-        if problem:
-            return problem
+def run(context) -> str:
+    """Open the chat window. A message for the user, or "" when done."""
+    problem = _server_problem(context, "The chat window")
+    if problem:
+        return problem
     path = pid_path()
     if window_alive(path):
-        request_family(family or "")
-        return ""
+        return "The SALOME Agent window is already open."
     launcher = os.environ.get("SALOME_AGENT_GUI")
     if not launcher:
-        return ("SALOME_AGENT_GUI is not set; the chat window cannot be started "
-                "(install the salome_agent_gui SAT product).")
-    launch_window(launcher, path, args=("--mode", family) if family else ())
+        return ("SALOME_AGENT_GUI is not set; the agent server is running but the chat "
+                "window cannot be started (install the salome_agent_gui SAT product).")
+    launch_window(launcher, path)
     return ""
 
 
@@ -314,7 +297,7 @@ def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_f
         "Then ask the client for something in SALOME, e.g. <i>make a 10 mm cube with a 2 mm "
         "fillet</i>. The server runs until SALOME closes or you stop it; closing this window "
         "leaves it running. The agent server serves one client at a time: keep the chat window "
-        "out of an Agentic assistant conversation while a client builds.<br>Claude Desktop "
+        "out of a conversation while a client builds.<br>Claude Desktop "
         "starts its own server instead: <tt>salome-agent-gui.sh --mcp --desktop-config</tt> "
         f"prints its entry. Log: <tt>{info.get('log', '')}</tt>")
     notes.setWordWrap(True)
@@ -366,12 +349,12 @@ def _parent_window():
         return None
 
 
-def menu_window(context, family: str) -> None:
-    """Tools > Plugins > AI tools > SALOME agent / Documentation (RAG)."""
+def menu_window(context) -> None:
+    """Tools > Plugins > AI tools > SALOME agent."""
     from PyQt5.QtWidgets import QMessageBox
 
     try:
-        msg = run(context, family)
+        msg = run(context)
     except Exception as e:  # noqa: BLE001
         QMessageBox.warning(_parent_window(), TITLE, f"Failed to open the window:\n{e}")
         return

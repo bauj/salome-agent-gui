@@ -11,24 +11,21 @@ runs (Tools > Plugins > AI tools > MCP server, or the headless server):
   each module with the guide the engine's specialist reads;
 - calc, the engine's locked-down arithmetic tool;
 - a look at the 3D view, the study, show/hide/delete;
-- the calls replayed as a standalone result.py, as the agent writes one;
-- the documentation index of the RAG modes, searched without any LLM: Claude
-  reads the passages and pages itself.
+- the calls replayed as a standalone result.py, as the agent writes one.
 
 It talks to the agent server like an open chat-window conversation does: one
-held session, so the chat window's Agentic assistant waits while Claude builds
+held session, so the SALOME chat window waits while Claude builds
 (release_salome hands it back). Nothing here calls a model: Claude does, under
 the user's own Claude plan.
 
-Run: salome-agent-mcp [--config CONFIG] [--check]       on stdio (the client starts it)
-     salome-agent-mcp --http [--port PORT] [--config CONFIG]
+Run: salome-agent-mcp [--check]       on stdio (the client starts it)
+     salome-agent-mcp --http [--port PORT]
         a server on 127.0.0.1 that Claude Code, Gemini CLI or any MCP client
         connects to (Tools > Plugins > AI tools > MCP server starts this one);
         the port and the bearer token are kept in ~/.local/share/salome-agent/mcp-http.json
 """
 import argparse
 import contextlib
-import copy
 import hmac
 import json
 import os
@@ -50,8 +47,7 @@ IDLE_RELEASE_S = 15 * 60
 SERVER_NAME = "salome-agent"
 
 INSTRUCTIONS = """\
-SALOME tools: build and mesh geometry in the user's running SALOME session, and
-search the SALOME documentation.
+SALOME tools: build and mesh geometry in the user's running SALOME session.
 
 Building:
 1. Choose the module: SHAPER for CAD unless the user asks for GEOM; SMESH to mesh
@@ -66,10 +62,7 @@ Building:
    built; offer it at the end.
 7. When done building, call release_salome so the SALOME chat window can use
    the agent server again. After 15 minutes without a SALOME call the session is
-   released anyway, and the names built before can no longer be used.
-
-Documentation: search_salome_docs, then read_salome_doc_page for a page worth
-reading in full. Answer from what they return and cite the pages."""
+   released anyway, and the names built before can no longer be used."""
 
 ADAPTATION = """\
 # How this session differs from the guide below
@@ -91,10 +84,9 @@ class SalomeError(Exception):
     """A problem worth telling Claude as is."""
 
 
-BUSY = ("The SALOME agent server is busy: the SALOME chat window has an Agentic "
-        "assistant conversation open (or another client holds the server). Ask the user to "
-        "end it there (New conversation) or switch the window to a documentation mode, "
-        "then try again.")
+BUSY = ("The SALOME agent server is busy: the SALOME chat window has a "
+        "conversation open (or another client holds the server). Ask the user to "
+        "end it there (New conversation), then try again.")
 
 
 def _unavailable(message: str) -> str:
@@ -332,168 +324,6 @@ def client_key(ctx) -> str | None:
     return headers.get("mcp-session-id") if headers is not None else None
 
 
-# ---- the documentation side -----------------------------------------------
-class DocSearch:
-    """raglib's agentic-RAG search (dense + keyword + reranker, whole sections),
-    without its LLM: the index and models of the documentation modes."""
-
-    def __init__(self, config_path=None, loader=None):
-        self._config_path = config_path
-        self._loader = loader or self._load
-        self._lock = threading.Lock()
-        self._state = None
-
-    def config_path(self) -> Path:
-        from salome_agent_gui import config_store
-
-        if self._config_path:
-            return Path(self._config_path).expanduser()
-        return config_store.startup_config(config_store.ensure_user_config())[0]
-
-    def _load(self, path: Path) -> dict:
-        from salome_agent_gui import rag_backend, rag_models
-
-        data = json.loads(Path(path).read_text())
-        if not isinstance(data.get("rag"), dict):
-            raise SalomeError(f"{path} has no rag section: open the documentation modes in the "
-                              "SALOME chat window once, or copy it from config.example.json")
-        absent = rag_models.missing(data)
-        if absent:
-            names = ", ".join(m for _, _, m in absent)
-            raise SalomeError(f"local model(s) not installed: {names}. Download them in the "
-                              "SALOME chat window: Settings > Local models.")
-        # search needs no LLM, but raglib builds one: give it a placeholder
-        data = copy.deepcopy(data)
-        llm = data.setdefault("llm", {})
-        llm["base_url"] = llm.get("base_url") or "http://127.0.0.1:9/v1"
-        llm["model"] = llm.get("model") or "unused"
-        chatbot = rag_backend.resolve_chatbot(data, path)
-        if not isinstance(chatbot.get("agentic"), dict):
-            raise SalomeError('search needs rag.chatbot.agentic (its page_index_path) in the config')
-        rag_backend.ensure_path()
-        # raglib prints progress to stdout, the MCP channel: send it to stderr
-        with contextlib.redirect_stdout(sys.stderr):
-            try:
-                from core import ChatbotConfig, DocumentationChatbot
-                from html_parser import parse_page, search_pages
-            except ImportError as e:
-                raise SalomeError(f"{e}; {rag_backend.INSTALL_HINT}") from e
-            config = rag_backend._load_config(ChatbotConfig, chatbot)
-            if not Path(config.chromadb_path).exists():
-                raise SalomeError(f"no documentation index at {config.chromadb_path}: build it "
-                                  "in the SALOME chat window (Settings > Build index)")
-            bot = DocumentationChatbot(config)
-        index_file = Path(config.agentic.page_index_path)
-        if not index_file.exists():
-            raise SalomeError(f"no page index at {index_file}: build the index again")
-        pages = json.loads(index_file.read_text())
-        score = bot.score_against_query if bot.reranker is not None else None
-
-        def search(query: str, top_n: int):
-            return search_pages(bot.vectorstore, pages, query, bm25_index=bot.bm25_index,
-                                title_boost_enabled=config.title_boost_enabled,
-                                rerank_fn=score, select_sections_fn=bot.expand_sections,
-                                top_n=top_n, char_budget=config.agentic.section_char_budget,
-                                k=15)
-
-        db = Path(config.chromadb_path)
-        return {"search": search, "read": parse_page,
-                "pages": {p["filename"]: p for p in pages},
-                "max_chars": config.agentic.max_chars_per_page,
-                "online": online_roots(rag_backend.resolve_extraction(data, path)),
-                # a rebuilt index or an edited config is loaded again
-                "watch": [str(path), str(index_file), str(db), str(db / "chroma.sqlite3")]}
-
-    def _online(self, entry: dict) -> str:
-        """The page on docs.salome-platform.org, from the module's citation URL
-        (rag.extraction.modules) and the page's path under its doc folder."""
-        if entry.get("url"):
-            return entry["url"]
-        roots = (self._state or {}).get("online") or {}
-        folder, base = roots.get((entry.get("module"), entry.get("doc_category")), (None, None))
-        if not folder or not base or not entry.get("filepath"):
-            return ""
-        try:
-            rel = Path(entry["filepath"]).resolve().relative_to(Path(folder).resolve())
-        except ValueError:
-            return ""
-        return base.rstrip("/") + "/" + rel.as_posix()
-
-    def _get(self) -> dict:
-        with self._lock:
-            state = self._state
-            if state is not None and _stamp(state.get("watch")) != state.get("stamp"):
-                self._state = None
-            if self._state is None:
-                with contextlib.redirect_stdout(sys.stderr):
-                    state = self._loader(self.config_path())
-                self._state = dict(state, stamp=_stamp(state.get("watch")))
-            return self._state
-
-    def search(self, query: str, top_n: int = 5) -> str:
-        state = self._get()
-        with contextlib.redirect_stdout(sys.stderr):
-            found = state["search"](query, top_n)
-        if not found:
-            return f"No match for {query!r}: try other words or a broader term."
-        out = []
-        for i, e in enumerate(found, 1):
-            head = f"[{i}] {e.get('title') or e['filename']} | {e.get('module', '')}/{e.get('doc_category', '')}"
-            head += f"\nfilename: {e['filename']}"
-            online = self._online(e)
-            if online:
-                head += f"\nonline: {online}"
-            out.append(f"{head}\n{e.get('section_text', '')}")
-        return "\n\n".join(out)
-
-    def read(self, filename: str, doc_category: str) -> str:
-        state = self._get()
-        entry = state["pages"].get(filename)
-        if entry is None:
-            raise SalomeError(f"{filename!r} is not a page of the index: use a filename "
-                              "search_salome_docs returned")
-        with contextlib.redirect_stdout(sys.stderr):
-            try:
-                text = state["read"](entry["filepath"], doc_category or entry.get("doc_category", ""),
-                                     max_chars=state["max_chars"])
-            except FileNotFoundError:
-                raise SalomeError(f"page file not found: {entry['filepath']}") from None
-        online = self._online(entry)
-        where = f"{entry['filepath']}" + (f", online: {online}" if online else "")
-        return f"{entry.get('title') or filename} ({where})\n\n{text}"
-
-    def status(self) -> dict:
-        try:
-            path = self.config_path()
-        except Exception as e:  # noqa: BLE001
-            return {"ready": False, "error": str(e)}
-        return {"config": str(path), "loaded": self._state is not None}
-
-
-def _stamp(paths) -> tuple:
-    out = []
-    for p in paths or ():
-        try:
-            out.append(Path(p).stat().st_mtime_ns)
-        except OSError:
-            out.append(None)
-    return tuple(out)
-
-
-def online_roots(extraction: dict) -> dict:
-    """{(module, "dev"|"user"): (local doc folder, online base URL)}."""
-    out = {}
-    for name, m in (extraction.get("modules") or {}).items():
-        if not isinstance(m, dict):
-            continue
-        cite = m.get("url_for_sources_citation")
-        for cat, key in (("dev", "dev_path"), ("user", "user_path")):
-            base = cite.get(cat) if isinstance(cite, dict) else cite
-            if m.get(key) and base:
-                out[(name, cat)] = (m[key], base)
-    return out
-
-
 # ---- the MCP server --------------------------------------------------------
 def _catalogue(module: str) -> list[dict]:
     import importlib
@@ -520,7 +350,7 @@ def guide(module: str) -> str:
             + f"\n\n# All {module} tools\n" + catalogue)
 
 
-def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSearch | None = None):
+def build_server(session: SalomeSession | SessionPool | None = None):
     from mcp.server.mcpserver import Context, Image, MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
     from mcp_types import ToolAnnotations
@@ -532,7 +362,6 @@ def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSe
 
     def mine(ctx) -> SalomeSession:
         return pool.get(client_key(ctx))
-    docs = docs or DocSearch()
     server = MCPServer("salome-agent", instructions=INSTRUCTIONS)
     read_only = ToolAnnotations(read_only_hint=True, open_world_hint=False)
     builds = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
@@ -547,7 +376,7 @@ def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSe
 
     @server.tool(annotations=read_only, structured_output=False)
     def salome_status(ctx: Context) -> str:
-        """Whether the SALOME session and the documentation search are available."""
+        """Whether the SALOME agent server and this client's session are available."""
         try:
             from salome_agent import server_conn
             hs = server_conn.read_handshake()
@@ -555,7 +384,7 @@ def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSe
             hs = None
         out = {"agent_server": ("running" if hs else "not found: in SALOME, open Tools > Plugins "
                                 "> AI tools > MCP server"),
-               "salome": mine(ctx).status(), "docs": docs.status()}
+               "salome": mine(ctx).status()}
         return json.dumps(out, indent=1)
 
     @server.tool(annotations=read_only, structured_output=False)
@@ -652,30 +481,16 @@ def build_server(session: SalomeSession | SessionPool | None = None, docs: DocSe
 
     @server.tool(annotations=builds, structured_output=False)
     def release_salome(ctx: Context) -> str:
-        """End this session on the SALOME agent server, so the SALOME chat window's
-        Agentic assistant can use it. Objects stay in the study; save the script first
+        """End this session on the SALOME agent server, so the SALOME chat window
+        can use it. Objects stay in the study; save the script first
         if it is wanted."""
         return mine(ctx).release()
-
-    @server.tool(annotations=read_only, structured_output=False)
-    def search_salome_docs(query: str, top_n: int = 5) -> str:
-        """Search the SALOME documentation (GEOM, SHAPER, SMESH user guides and API
-        reference, as indexed for the SALOME chat window). Returns the best sections
-        with their page filename; read_salome_doc_page reads a whole page."""
-        return guarded(docs.search)(query, max(1, min(int(top_n), 15)))
-
-    @server.tool(annotations=read_only, structured_output=False)
-    def read_salome_doc_page(filename: str, doc_category: str = "") -> str:
-        """The text of a documentation page search_salome_docs returned (its filename,
-        and its category: "dev" for the API reference, "user" for the user guide)."""
-        return guarded(docs.read)(filename, doc_category)
 
     return server
 
 
-def check(config=None) -> int:
+def check() -> int:
     """--check: what Claude would find, printed to stderr."""
-    session, docs = SalomeSession(), DocSearch(config)
     try:
         from salome_agent import server_conn
         hs = server_conn.read_handshake()
@@ -683,24 +498,17 @@ def check(config=None) -> int:
               file=sys.stderr)
     except Exception as e:  # noqa: BLE001
         print(f"agent server: {e}", file=sys.stderr)
-    print(f"config: {docs.status()}", file=sys.stderr)
     for module in MODULES:
         try:
             print(f"{module}: {len(_catalogue(module))} tools", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
             print(f"{module}: tools not available ({type(e).__name__}: {e})", file=sys.stderr)
-    try:
-        docs._get()
-        print("documentation search: ready", file=sys.stderr)
-    except Exception as e:  # noqa: BLE001
-        print(f"documentation search: {e}", file=sys.stderr)
-    del session
     return 0
 
 
 def serve_stdio(server) -> None:
     """Serve on a private copy of stdout, with fd 1 and sys.stdout sent to
-    stderr: a stray print (raglib prints progress) or a library writing to fd 1
+    stderr: a stray print or a library writing to fd 1
     must never reach the protocol channel. mcp's own stdio_server diverts fd 1
     but leaves sys.stdout writing to it."""
     import io
@@ -814,7 +622,7 @@ def serve_http(server, port: int, token: str) -> None:
     uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")).run()
 
 
-def desktop_entry(config=None, environ=None, argv0=None) -> dict:
+def desktop_entry(environ=None, argv0=None) -> dict:
     """The mcpServers entry for Claude Desktop's claude_desktop_config.json. Under
     WSL, Claude Desktop is a Windows app: it starts the server through wsl.exe."""
     environ = os.environ if environ is None else environ
@@ -824,8 +632,6 @@ def desktop_entry(config=None, environ=None, argv0=None) -> dict:
         command = [str(launcher), "--mcp"]           # the venv activated, SALOME's env stripped
     else:
         command = [str(Path(argv0 or sys.argv[0]).resolve())]
-    if config:
-        command += ["--config", str(Path(config).expanduser().resolve())]
     distro = environ.get("WSL_DISTRO_NAME")
     if distro:
         return {"command": "wsl.exe", "args": ["-d", distro, "-e", *command]}
@@ -834,8 +640,6 @@ def desktop_entry(config=None, environ=None, argv0=None) -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="salome-agent-mcp", description=__doc__.split("\n")[0])
-    parser.add_argument("--config", help="config file for the documentation search "
-                                         "(default: the SALOME chat window's)")
     parser.add_argument("--check", action="store_true",
                         help="print what is available and exit, instead of serving")
     parser.add_argument("--desktop-config", action="store_true",
@@ -845,20 +649,19 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, help=f"--http port (default: the saved one, else {DEFAULT_PORT})")
     args = parser.parse_args(argv)
     if args.check:
-        return check(args.config)
+        return check()
     if args.desktop_config:
-        print(json.dumps({"mcpServers": {"salome-agent": desktop_entry(args.config)}}, indent=2))
+        print(json.dumps({"mcpServers": {"salome-agent": desktop_entry()}}, indent=2))
         return 0
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     if args.http:
         settings = http_settings(port=args.port)
         try:
             watch_parent(int(os.environ["SALOME_AGENT_GUI_PARENT_PID"]))
         except (KeyError, ValueError):
             pass
-        serve_http(build_server(docs=DocSearch(args.config)), settings["port"], settings["token"])
+        serve_http(build_server(), settings["port"], settings["token"])
         return 0
-    serve_stdio(build_server(docs=DocSearch(args.config)))
+    serve_stdio(build_server())
     return 0
 
 

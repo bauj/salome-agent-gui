@@ -4,7 +4,6 @@
 # Installs salome-agent-gui for an existing SALOME, without SAT.
 # Usage: ./install.sh <SALOME directory> [install directory]
 # Set PYTHON to choose the Python 3.10+ that runs the chat window.
-# Set RAG=0 to leave out the documentation modes (raglib: torch, chromadb, ...).
 set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -13,7 +12,6 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 SALOME_DIR=$(cd "$1" 2>/dev/null && pwd) || die "no such directory: $1"
 PREFIX=${2:-$HOME/.local/share/salome-agent-gui}
 PYTHON=${PYTHON:-python3}
-RAG=${RAG:-1}
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 [ -x "$SALOME_DIR/salome" ] || die "$SALOME_DIR has no salome launcher"
@@ -30,37 +28,27 @@ SALOME_PY=$("$SALOME_DIR/salome" shell -- python3 -V 2>/dev/null \
     || die "this SALOME runs on Python $SALOME_PY; the agent server inside it needs 3.10+"
 echo "   Python $SALOME_PY"
 
-if [ ! -f "$SRC/salome-agent/pyproject.toml" ] || [ ! -f "$SRC/raglib/chatbot/core/config.py" ]; then
-    echo "== Fetching the salome-agent and raglib submodules"
+if [ ! -f "$SRC/salome-agent/pyproject.toml" ]; then
+    echo "== Fetching the salome-agent submodule"
     git -C "$SRC" submodule update --init
 fi
 
 echo "== Installing the chat window in $PREFIX"
 echo "   Takes about 500 MB, mostly Qt WebEngine (Chromium); the download can take a few minutes."
-[ "$RAG" = 0 ] || echo "   The documentation modes add about 2 GB (CPU-only torch, embedding models); RAG=0 leaves them out."
 "$PYTHON" -m venv "$PREFIX"
 # pip builds in-tree: build from a copy so the checkout stays clean.
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 tar -C "$SRC" --exclude=.git --exclude=.venv --exclude=./build \
     --exclude=./salome-agent/build --exclude='*.egg-info' -cf - . | tar -C "$BUILD" -xf -
-if [ "$RAG" = 0 ]; then
-    (cd "$BUILD" && "$PREFIX/bin/pip" install -q -c constraints.txt ./salome-agent .)
-else
-    # CPU-only torch first: from PyPI, pip would pull several GB of CUDA wheels.
-    "$PREFIX/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
-    (cd "$BUILD" && "$PREFIX/bin/pip" install -q -c constraints.txt ./salome-agent '.[rag]')
-fi
+(cd "$BUILD" && "$PREFIX/bin/pip" install -q -c constraints.txt ./salome-agent .)
 # -I: python -c would otherwise import the checkout when run from inside it.
 "$PREFIX/bin/python" -I -c \
     'import salome_agent_gui.app, salome_agent_gui.mcp_server, mcp.server.mcpserver; from salome_agent.graph import build_graph; build_graph(batch=True)' \
     || die "the installed salome-agent-gui does not import"
-if [ "$RAG" != 0 ]; then
-    "$PREFIX/bin/python" -I -c \
-        'from salome_agent_gui import rag_backend; rag_backend.ensure_path(); import core' \
-        || die "the documentation modes (raglib) do not import"
-fi
 
+SITE=$("$PREFIX/bin/python" -I -c 'import salome_agent_gui, os; print(os.path.dirname(salome_agent_gui.__file__))')
+cp "$SRC/salome-agent/config.example.json" "$SITE/config.example.json"
 install -m 755 "$SRC/salome-agent-gui.sh" "$PREFIX/bin/salome-agent-gui.sh"
 
 echo "== Installing the SALOME plugin"
@@ -85,7 +73,6 @@ cat <<EOF
 Done. Start SALOME with:
     $LAUNCHER
 then open Tools > Plugins > AI tools > SALOME agent. In the chat window, the gear icon asks
-for your LLM endpoint, API key and model, and switches between the SALOME Agent
-and the documentation modes. Build their documentation index there, or with:
-    $SALOME_DIR/salome shell -- $PREFIX/bin/salome-agent-gui.sh --build-index
+for your LLM endpoint, API key and model. Tools > Plugins > AI tools > MCP server serves this
+SALOME to Claude Code, Gemini CLI or another MCP client.
 EOF
