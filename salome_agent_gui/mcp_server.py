@@ -258,6 +258,11 @@ class SalomeSession:
                 graph.append(block, call["tool"], call["args"], call["records"], 0,
                              module=current)
             published = [p for n in graph.nodes.values() for p in n.published]
+            # SMESH publishes nothing: a mesh is kept as a root, as amend does
+            published += [v for c in self.calls if c["module"] == "smesh"
+                          and c["tool"] == "create_mesh"
+                          for r in c["records"] if isinstance(r, dict)
+                          for v in r.get("out_vars") or []]
             roots = [p for p in dict.fromkeys(published) if p not in self.deleted]
             return render_script(graph, self.run_id, roots=roots)
 

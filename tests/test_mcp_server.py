@@ -272,6 +272,38 @@ def test_deleted_objects_leave_the_script_unless_a_kept_one_needs_them(tmp_path)
     assert "MakeCutList" in session.script()               # recreated with the same name
 
 
+def _smesh_rec(fn, code, out=(), refs=(), recv=None):
+    # as executor/smesh records them (executor.shaper.state.record): SMESH publishes nothing
+    rec = {"fn": fn, "emit": "stmt", "code": code, "out_vars": list(out),
+           "args": [{"kind": "expr", "value": "", "refs": sorted(refs)}] if refs else [],
+           "publish": None}
+    if recv is not None:
+        rec["recv"] = recv
+    return rec
+
+
+def test_a_mesh_of_a_built_shape_is_in_the_script(tmp_path):
+    """salome-agent #60: the SMESH part was pruned from result.py, as a mesh is
+    never published and only published objects were kept."""
+    mesh = _smesh_rec("Mesh", "mesh_1 = smesh.Mesh(cut_1, 'mesh_1')", out=["mesh_1"],
+                      refs=["cut_1"])
+    tetra = _smesh_rec("mesh_tetra", "mesh_1_netgen = mesh_1.Tetrahedron(algo=smeshBuilder.NETGEN_1D2D3D)",
+                       recv="mesh_1")
+    compute = _smesh_rec("Compute", "mesh_1.Compute()", recv="mesh_1")
+    server, session = _built(tmp_path)
+    session.client.replies.update({"create_mesh": {"ok": True, "records": [mesh]},
+                                   "mesh_tetra": {"ok": True, "records": [tetra]},
+                                   "compute": {"ok": True, "records": [compute]}})
+    for name in ("create_mesh", "mesh_tetra", "compute"):
+        call(server, "call_cad_tool", {"module": "smesh", "name": name, "arguments": {}})
+    script = session.script()
+    assert "mesh_1 = smesh.Mesh(cut_1, 'mesh_1')" in script
+    assert "mesh_1.Tetrahedron(" in script and "mesh_1.Compute()" in script
+    assert "MakeCutList" in script                          # the shape it meshes
+    call(server, "delete_objects", {"names": ["mesh_1"]})
+    assert "smesh.Mesh(" not in session.script()            # a deleted mesh leaves it
+
+
 def test_no_script_before_anything_is_built_and_paths_must_be_absolute(tmp_path):
     server, _, _ = make(tmp_path, FakeClient())
     r = call(server, "save_salome_script")
