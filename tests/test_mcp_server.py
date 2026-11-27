@@ -4,6 +4,7 @@
 import asyncio
 import base64
 import json
+import os
 import sys
 import textwrap
 
@@ -511,6 +512,28 @@ def test_the_http_server_stops_with_salome():
     alive = ms.watch_parent(os.getpid(), interval=0.01, exit_fn=exits.append)
     alive.join(0.1)
     assert exits == [0] and alive.is_alive()
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="needs /proc")
+def test_the_http_server_stops_when_salome_is_a_zombie_or_its_pid_is_reused(monkeypatch):
+    import subprocess
+    import time
+
+    child = subprocess.Popen(["true"])            # exits at once, not reaped: a zombie
+    deadline = time.time() + 5
+    while (ms._pid_stat(child.pid) or ("",))[0] != "Z":
+        assert time.time() < deadline
+        time.sleep(0.01)
+    exits = []
+    ms.watch_parent(child.pid, interval=0.01, exit_fn=exits.append).join(2)
+    child.wait()
+    assert exits == [0]
+
+    starts = iter([("S", 100)] + [("S", 200)] * 1000)  # same pid, another process
+    monkeypatch.setattr(ms, "_pid_stat", lambda pid: next(starts))
+    reused = []
+    ms.watch_parent(os.getpid(), interval=0.01, exit_fn=reused.append).join(2)
+    assert reused == [0]
 
 
 def test_the_token_file_is_made_private_even_if_it_was_not(tmp_path):
