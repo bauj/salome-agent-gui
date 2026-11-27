@@ -84,9 +84,19 @@ class SalomeError(Exception):
     """A problem worth telling Claude as is."""
 
 
+class ServerHeld(SalomeError):
+    """The agent server is held by another client: the chat window, or another
+    MCP client of this server."""
+
+
 BUSY = ("The SALOME agent server is busy: the SALOME chat window has a "
         "conversation open (or another client holds the server). Ask the user to "
         "end it there (New conversation), then try again.")
+
+
+def _minutes(seconds: float) -> str:
+    m = round(seconds / 60)
+    return "less than a minute" if m < 1 else f"{m} minute" + ("s" if m != 1 else "")
 
 
 def _unavailable(message: str) -> str:
@@ -120,6 +130,7 @@ class SalomeSession:
         self.calls: list[dict] = []          # {module, tool, args, records}
         self.deleted: set[str] = set()
         self._saved: set[Path] = set()      # files save_script may overwrite
+        self.held_elsewhere = None          # set by a SessionPool: who else holds the server
 
     # connection
     def _open(self):
@@ -130,16 +141,20 @@ class SalomeSession:
                 try:
                     return server_conn.connect(run_id, hold=True, run_dir=run_dir)
                 except server_conn.ServerUnavailable as e:
-                    raise SalomeError(_unavailable(str(e))) from e
+                    msg = _unavailable(str(e))
+                    raise (ServerHeld if msg == BUSY else SalomeError)(msg) from e
             self._connect = connect
         run_id = uuid.uuid4().hex[:12]
         run_dir = self._runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.client = self._connect(run_id, str(run_dir))
-        except BaseException:
+        except BaseException as e:
             with contextlib.suppress(OSError):
                 run_dir.rmdir()                  # only if the failed connect left it empty
+            other = self.held_elsewhere() if self.held_elsewhere else None
+            if isinstance(e, ServerHeld) and other is not None:
+                raise ServerHeld(other) from e
             raise
         self.run_id = run_id
         self.calls, self.deleted, self._saved = [], set(), set()
@@ -189,6 +204,22 @@ class SalomeSession:
             except Exception:  # noqa: BLE001
                 pass
         self.client = None
+
+    def holder_note(self) -> str | None:
+        """Why this session holds the agent server, said to another client; None
+        if it holds nothing. No lock: the asking session holds its own, and two
+        clients asking each other at once would deadlock; a stale read only
+        words the message."""
+        if self.client is None:
+            return None
+        idle = max(0.0, self._clock() - self._last_used)
+        left = max(0.0, self._idle_s - idle)
+        return (f"The SALOME agent server is held by another MCP client of this server: its "
+                f"last SALOME call was {_minutes(idle)} ago. It is released when that client "
+                f"ends its session, or after {self._idle_s / 60:g} minutes without a call "
+                f"(in {_minutes(left)}). Restarting the server from Tools > Plugins > AI "
+                "tools > MCP server releases it now, but that client then loses the names "
+                "of what it built. Ask the user which they prefer, then try again.")
 
     def release(self) -> str:
         with self._lock:
@@ -305,11 +336,25 @@ class SessionPool:
                 session = self._sessions.get(key)
                 if session is None:
                     session = self._sessions[key] = self._factory()
+                    session.held_elsewhere = lambda s=session: self._holder_note(s)
             if self._reaper is None and self._reap_every:
                 self._reaper = threading.Thread(target=self._reap_loop, daemon=True,
                                                 name="mcp-idle-release")
                 self._reaper.start()
         return session
+
+    def _holder_note(self, asking: SalomeSession) -> str | None:
+        with self._lock:
+            others = [s for s in self._sessions.values() if s is not asking]
+        return next((n for n in (s.holder_note() for s in others) if n), None)
+
+    def end(self, key) -> None:
+        """The client `key` ended its MCP session: release what it holds now,
+        rather than after the idle release."""
+        with self._lock:
+            session = self._sessions.pop(key, None) if self._single is None else None
+        if session is not None:
+            session.release()
 
     def reap(self) -> None:
         with self._lock:
@@ -372,6 +417,7 @@ def build_server(session: SalomeSession | SessionPool | None = None):
     def mine(ctx) -> SalomeSession:
         return pool.get(client_key(ctx))
     server = MCPServer("salome-agent", instructions=INSTRUCTIONS)
+    server.salome_pool = pool                # serve_http releases a closed client's session
     read_only = ToolAnnotations(read_only_hint=True, open_world_hint=False)
     builds = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
 
@@ -586,6 +632,21 @@ def client_commands(port: int, token: str) -> dict:
             "Other MCP clients": f"URL {url}, header {auth}"}
 
 
+def release_on_close(app, pool):
+    """The ASGI app, releasing a client's SALOME session as soon as it ends its
+    MCP session (an HTTP DELETE naming it), not after the idle release: the
+    next client would be told the server is busy until then. A client that
+    goes away without a DELETE is still released when idle."""
+    async def run(scope, receive, send):
+        await app(scope, receive, send)
+        if scope["type"] == "http" and scope.get("method") == "DELETE":
+            key = dict(scope.get("headers") or ()).get(b"mcp-session-id")
+            if key:
+                import anyio
+                await anyio.to_thread.run_sync(pool.end, key.decode("latin-1"))
+    return run
+
+
 def require_token(app, token: str):
     """The ASGI app, answering 401 to an HTTP request without the bearer token:
     the server listens on loopback, but any local user could reach it."""
@@ -641,7 +702,10 @@ def watch_parent(pid: int, interval: float = 2.0, exit_fn=os._exit) -> threading
 def serve_http(server, port: int, token: str) -> None:
     import uvicorn
 
-    app = require_token(server.streamable_http_app(host="127.0.0.1"), token)
+    app = server.streamable_http_app(host="127.0.0.1")
+    if getattr(server, "salome_pool", None) is not None:
+        app = release_on_close(app, server.salome_pool)
+    app = require_token(app, token)
     for name, line in client_commands(port, token).items():
         print(f"{name}: {line}", file=sys.stderr)
     uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")).run()

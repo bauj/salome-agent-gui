@@ -183,6 +183,57 @@ def test_a_busy_server_says_who_holds_it_not_how_to_start_it(tmp_path, monkeypat
     assert "Start it" not in text(r)
 
 
+def test_a_server_held_by_another_mcp_client_says_so_and_when_it_is_freed(tmp_path):
+    now, held = [0.0], []
+
+    class Held(FakeClient):
+        def close(self):
+            held.remove(self)
+
+    def connect(run_id, run_dir):
+        if held:
+            raise ms.ServerHeld(ms.BUSY)
+        held.append(Held())
+        return held[-1]
+
+    pool = ms.SessionPool(factory=lambda: ms.SalomeSession(
+        connect=connect, runs_dir=tmp_path, idle_release_s=900, clock=lambda: now[0]),
+        reap_every=0)
+    pool.get("a").list_study()
+    now[0] = 300
+    with pytest.raises(ms.SalomeError) as e:
+        pool.get("b").list_study()
+    msg = str(e.value)
+    assert "another MCP client" in msg and "5 minutes ago" in msg and "in 10 minutes" in msg
+    assert "MCP server" in msg and "New conversation" not in msg
+    pool.end("a")                                       # its client closed the session
+    assert not held and pool.get("b").list_study()
+    assert pool.get("a") is not None and pool.get("a").client is None   # a fresh one
+    pool.end("nobody")                                  # an unknown session: nothing to do
+
+
+def test_a_client_closing_its_http_session_releases_the_agent_server():
+    ended = []
+
+    class Pool:
+        def end(self, key):
+            ended.append(key)
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def send(message):
+        pass
+
+    wrapped = ms.release_on_close(app, Pool())
+    for method in ("POST", "GET", "DELETE"):
+        scope = {"type": "http", "method": method, "headers": [(b"mcp-session-id", b"s1")]}
+        asyncio.run(wrapped(scope, None, send))
+    asyncio.run(wrapped({"type": "http", "method": "DELETE", "headers": []}, None, send))
+    assert ended == ["s1"]                              # only a DELETE naming a session
+
+
 def test_release_hands_the_server_back(tmp_path):
     client = FakeClient({"make_box": {"ok": True, "records": [BOX]}})
     server, session, opened = make(tmp_path, client)
@@ -461,6 +512,8 @@ HTTP_SESSIONS_SCRIPT = textwrap.dedent("""
     import sys
     from salome_agent_gui import mcp_server as ms
 
+    held = []                                   # the agent server: one holder at a time
+
     class Client:
         mode, name_prefix = "gui", ""
 
@@ -471,11 +524,16 @@ HTTP_SESSIONS_SCRIPT = textwrap.dedent("""
             return {"objects": [{"name": self.run_id}]}
 
         def close(self):
-            pass
+            held.remove(self)
+
+    def connect(run_id, run_dir):
+        if held:
+            raise ms.ServerHeld(ms.BUSY)
+        held.append(Client(run_id))
+        return held[-1]
 
     def factory():
-        return ms.SalomeSession(connect=lambda run_id, run_dir: Client(run_id),
-                                runs_dir=sys.argv[3])
+        return ms.SalomeSession(connect=connect, runs_dir=sys.argv[3])
 
     ms.serve_http(ms.build_server(ms.SessionPool(factory=factory)), int(sys.argv[1]), sys.argv[2])
 """)
@@ -522,7 +580,7 @@ def test_over_http_each_client_has_its_own_salome_session(tmp_path):
         proc.terminate()
         proc.wait(10)
     assert first[0] == first[1] and second[0] == second[1]      # one session per client
-    assert first[0] != second[0]
+    assert first[0] != second[0]           # and the first, closed, let the second have it (#532)
 
 
 def test_http_settings_keep_the_token_and_take_a_new_port(tmp_path):
