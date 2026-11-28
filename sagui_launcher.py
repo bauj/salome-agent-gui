@@ -366,6 +366,8 @@ def show_mcp_dialog(info: dict, parent=None, alive_fn=None, port_fn=None, stop_f
         "window leaves it running.</li>"
         "<li>The agent server serves one client at a time: keep the chat window out of a "
         "conversation while a client builds.</li>"
+        "<li>Claude Code windows share one SALOME session: another window or a restart sees "
+        "the same names, and releasing it ends it for all of them.</li>"
         "<li>Claude Desktop can also start its own server: "
         "<tt style='white-space:pre'>salome-agent-gui.sh --mcp --desktop-config</tt> prints its entry.</li></ul>"
         f"Log: <tt>{info.get('log', '')}</tt>")

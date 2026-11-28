@@ -234,6 +234,49 @@ def test_a_client_closing_its_http_session_releases_the_agent_server():
     assert ended == ["s1"]                              # only a DELETE naming a session
 
 
+def test_a_request_without_an_mcp_session_gets_the_shared_key():
+    from types import SimpleNamespace as NS
+
+    def ctx(headers):
+        return NS(request_context=NS(request=NS(headers=headers)))
+
+    assert ms.client_key(ctx({"mcp-session-id": "abc"})) == "abc"
+    assert ms.client_key(ctx({})) == ms.SHARED_KEY          # protocol 2026-07-28: no sessions
+    assert ms.client_key(NS()) is None                      # stdio
+
+
+def test_the_shared_session_says_so_in_its_status_and_to_a_refused_client(tmp_path):
+    held = []
+
+    class Held(FakeClient):
+        def close(self):
+            held.remove(self)
+
+    def connect(run_id, run_dir):
+        if held:
+            raise ms.ServerHeld(ms.BUSY)
+        held.append(Held())
+        return held[-1]
+
+    pool = ms.SessionPool(factory=lambda: ms.SalomeSession(connect=connect, runs_dir=tmp_path),
+                          reap_every=0)
+    shared = pool.get(ms.SHARED_KEY)
+    shared.list_study()
+    assert "Claude Code" in shared.status()["shared"]
+    assert "shared" not in pool.get("legacy").status()
+    with pytest.raises(ms.SalomeError) as e:
+        pool.get("legacy").list_study()
+    assert "share one session" in str(e.value)
+
+
+def test_the_status_names_no_session_once_released(tmp_path):
+    server, session, _ = make(tmp_path, FakeClient())
+    call(server, "list_study")
+    assert session.status()["session"] == session.run_id
+    call(server, "release_salome")
+    assert session.status()["session"] is None and not session.status()["session_open"]
+
+
 def test_release_hands_the_server_back(tmp_path):
     client = FakeClient({"make_box": {"ok": True, "records": [BOX]}})
     server, session, opened = make(tmp_path, client)
@@ -581,6 +624,50 @@ def test_over_http_each_client_has_its_own_salome_session(tmp_path):
         proc.wait(10)
     assert first[0] == first[1] and second[0] == second[1]      # one session per client
     assert first[0] != second[0]           # and the first, closed, let the second have it (#532)
+
+
+def test_over_http_clients_without_an_mcp_session_share_one(tmp_path):
+    """Claude Code speaks protocol 2026-07-28: no MCP session, so every such client
+    (a second window, a restart) shares one SALOME session, and is told so."""
+    import subprocess
+    import time
+
+    import httpx2
+    from mcp import Client
+    from mcp.client.streamable_http import streamable_http_client
+
+    script = tmp_path / "serve_http.py"
+    script.write_text(HTTP_SESSIONS_SCRIPT)
+    port, token = _free_port(), "s3cret-token-0123456789"
+    url = ms.http_url(port)
+    proc = subprocess.Popen([sys.executable, str(script), str(port), token, str(tmp_path / "runs")],
+                            stderr=subprocess.DEVNULL)
+
+    async def run(mode):
+        async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as http:
+            async with Client(streamable_http_client(url, http_client=http), mode=mode) as c:
+                r = await c.call_tool("list_study", {})
+                status = await c.call_tool("salome_status", {})
+                return c.protocol_version, r, json.loads(status.content[0].text)["salome"]
+
+    try:
+        deadline = time.time() + 30
+        while True:
+            try:
+                httpx2.post(url, json={})
+                break
+            except httpx2.ConnectError:
+                assert proc.poll() is None and time.time() < deadline
+                time.sleep(0.2)
+        (v1, r1, s1), (v2, r2, s2) = asyncio.run(run("2026-07-28")), asyncio.run(run("2026-07-28"))
+        _, legacy, _ = asyncio.run(run("legacy"))
+    finally:
+        proc.terminate()
+        proc.wait(10)
+    assert v1 == v2 == "2026-07-28"
+    assert json.loads(r1.content[0].text) == json.loads(r2.content[0].text)   # one session
+    assert s1["session"] == s2["session"] and "Claude Code" in s1["shared"]
+    assert legacy.is_error and "share one session" in legacy.content[0].text
 
 
 def test_http_settings_keep_the_token_and_take_a_new_port(tmp_path):

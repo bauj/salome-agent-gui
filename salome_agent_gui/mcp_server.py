@@ -45,6 +45,12 @@ DEFAULT_PORT = 47801
 # is not locked out by a client that went away or forgot release_salome
 IDLE_RELEASE_S = 15 * 60
 SERVER_NAME = "salome-agent"
+# --http clients on MCP protocol 2026-07-28 (Claude Code, for one) have no MCP
+# session, so nothing tells two of them apart: they share one SALOME session
+SHARED_KEY = "(shared)"
+SHARED_NOTE = ("shared by every client of this server without an MCP session of its own "
+               "(Claude Code, for one: each window and each restart): they see the same names "
+               "and the same script, and release_salome releases it for all of them")
 
 INSTRUCTIONS = """\
 SALOME tools: build and mesh geometry in the user's running SALOME session.
@@ -60,9 +66,15 @@ Building:
 5. view_salome shows the 3D view: look at the result when its shape matters.
 6. save_salome_script writes a standalone Python script that rebuilds what was
    built; offer it at the end.
-7. When done building, call release_salome so the SALOME chat window can use
-   the agent server again. After 15 minutes without a SALOME call the session is
-   released anyway, and the names built before can no longer be used."""
+7. Do not call release_salome on your own, not even when a request is done: it
+   ends the session, and its names (yours and those of every client sharing it)
+   can no longer be used. Call it only when the user asks to free SALOME, for
+   instance to use the SALOME chat window. After 15 minutes without a SALOME
+   call the session is released anyway.
+8. salome_status says when the session is shared: over HTTP, clients without an
+   MCP session of their own (Claude Code, for one) share one SALOME session, so
+   another window or a restart of the client sees the same names, and a
+   release ends it for all of them."""
 
 ADAPTATION = """\
 # How this session differs from the guide below
@@ -131,6 +143,7 @@ class SalomeSession:
         self.deleted: set[str] = set()
         self._saved: set[Path] = set()      # files save_script may overwrite
         self.held_elsewhere = None          # set by a SessionPool: who else holds the server
+        self.shared = False                 # set by a SessionPool for SHARED_KEY
 
     # connection
     def _open(self):
@@ -214,12 +227,15 @@ class SalomeSession:
             return None
         idle = max(0.0, self._clock() - self._last_used)
         left = max(0.0, self._idle_s - idle)
-        return (f"The SALOME agent server is held by another MCP client of this server: its "
-                f"last SALOME call was {_minutes(idle)} ago. It is released when that client "
-                f"ends its session, or after {self._idle_s / 60:g} minutes without a call "
+        who = ("the MCP clients of this server that share one session (clients without an MCP "
+               "session of their own, such as Claude Code)" if self.shared
+               else "another MCP client of this server")
+        return (f"The SALOME agent server is held by {who}: its "
+                f"last SALOME call was {_minutes(idle)} ago. It is released when it ends its "
+                f"session (release_salome), or after {self._idle_s / 60:g} minutes without a call "
                 f"(in {_minutes(left)}). Restarting the server from Tools > Plugins > AI "
-                "tools > MCP server releases it now, but that client then loses the names "
-                "of what it built. Ask the user which they prefer, then try again.")
+                "tools > MCP server releases it now, but the names of what was built there "
+                "are then lost. Ask the user which they prefer, then try again.")
 
     def release(self) -> str:
         with self._lock:
@@ -234,10 +250,13 @@ class SalomeSession:
 
     def status(self) -> dict:
         with self._lock:
-            out = {"session_open": self.client is not None, "session": self.run_id,
+            out = {"session_open": self.client is not None,
+                   "session": self.run_id if self.client is not None else None,
                    "calls_recorded": len(self.calls)}
             if self.client is not None:
                 out.update(mode=self.client.mode, name_prefix=self.client.name_prefix)
+            if self.shared:
+                out["shared"] = SHARED_NOTE
             return out
 
     # tools
@@ -314,10 +333,11 @@ class SalomeSession:
 
 
 class SessionPool:
-    """A SalomeSession per MCP client: each --http client (MCP session id) gets
-    its own names, recorded calls and script, and a second client asking while
-    the first holds the agent server is told it is busy. Stdio has one client.
-    Also releases sessions left idle."""
+    """A SalomeSession per MCP client: each --http client with an MCP session id
+    gets its own names, recorded calls and script, and a second client asking
+    while the first holds the agent server is told it is busy. The clients
+    without one (protocol 2026-07-28, Claude Code for one) share SHARED_KEY's.
+    Stdio has one client. Also releases sessions left idle."""
 
     def __init__(self, factory=SalomeSession, single: SalomeSession | None = None,
                  reap_every: float = 30.0):
@@ -337,6 +357,7 @@ class SessionPool:
                 if session is None:
                     session = self._sessions[key] = self._factory()
                     session.held_elsewhere = lambda s=session: self._holder_note(s)
+                    session.shared = key == SHARED_KEY
             if self._reaper is None and self._reap_every:
                 self._reaper = threading.Thread(target=self._reap_loop, daemon=True,
                                                 name="mcp-idle-release")
@@ -369,13 +390,16 @@ class SessionPool:
 
 
 def client_key(ctx) -> str | None:
-    """The MCP session id of the client making this request (--http), None on stdio."""
+    """The MCP session id of the client making this request (--http); SHARED_KEY
+    for an HTTP request with none (protocol 2026-07-28 has no sessions); None on stdio."""
     try:
         request = ctx.request_context.request
     except (AttributeError, ValueError):
         return None
     headers = getattr(request, "headers", None)
-    return headers.get("mcp-session-id") if headers is not None else None
+    if headers is None:
+        return None
+    return headers.get("mcp-session-id") or SHARED_KEY
 
 
 # ---- the MCP server --------------------------------------------------------
@@ -537,8 +561,10 @@ def build_server(session: SalomeSession | SessionPool | None = None):
     @server.tool(annotations=builds, structured_output=False)
     def release_salome(ctx: Context) -> str:
         """End this session on the SALOME agent server, so the SALOME chat window
-        can use it. Objects stay in the study; save the script first
-        if it is wanted."""
+        can use it. Only when the user asks for it: the names built so far can
+        no longer be used, and a shared session (see salome_status) ends for
+        every client sharing it. Objects stay in the study; save the script
+        first if it is wanted."""
         return mine(ctx).release()
 
     return server

@@ -250,8 +250,11 @@ SALOME you have open, like the chat window does.
    stops with SALOME or with the window's Stop server button, and logs to
    `~/.local/share/salome-agent/salome-agent-mcp.log`. Keep the chat window out of a
    conversation while a client builds: the agent server serves one client at a time.
-   Each MCP client gets its own session, and a second one that asks while the first holds the
-   agent server is told it is busy. A session left 15 minutes without a SALOME call is released,
+   Each MCP client with an MCP session of its own gets its own SALOME session, and a second one
+   that asks while the first holds the agent server is told it is busy. Clients without one
+   (MCP protocol 2026-07-28, Claude Code for one) share a single SALOME session: another Claude
+   Code window or a restart sees the same names and script, and `release_salome` ends it for
+   all of them; `salome_status` says when a session is shared. A session left 15 minutes without a SALOME call is released,
    so the chat window can use the server again: the next call says so, and the objects built
    before stay in the study but can no longer be referred to by name. `save_salome_script`
    writes to the session's folder, or to a new `.py` file you name; it never overwrites a file
