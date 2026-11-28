@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "salome-agent-gui"
-version = "0.2.3"
+version = "0.2.4"
 requires-python = ">=3.10"
 license = {text = "LGPL-2.1-or-later"}
 # mcp: salome-agent-mcp, SALOME as tools for Claude Desktop / Claude Code
